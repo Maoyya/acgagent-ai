@@ -1,0 +1,51 @@
+import pytest
+from app.db.chroma_client import init_chroma, close_chroma
+from app.db.memory_store import memory_store
+from app.core.memory import ConversationMemory, count_tokens
+from app.models.agent import MemoryConfig
+
+
+@pytest.fixture(autouse=True)
+def setup_chroma():
+    init_chroma()
+    yield
+    close_chroma()
+
+
+def test_count_tokens():
+    assert count_tokens("hello world") > 0
+    assert count_tokens("你好世界") > 0
+
+
+def test_save_and_load_messages():
+    conv_id = "test_conv_001"
+    memory_store.save_message(conv_id, "user", "Hello", token_count=5)
+    memory_store.save_message(conv_id, "assistant", "Hi there!", token_count=10)
+
+    history = memory_store.load_history(conv_id)
+    assert len(history) == 2
+    assert history[0]["role"] == "user"
+    assert history[0]["content"] == "Hello"
+    assert history[1]["role"] == "assistant"
+
+
+def test_conversation_memory_trim():
+    config = MemoryConfig(type="conversation_window", max_tokens=20)
+    memory = ConversationMemory(config)
+
+    conv_id = "test_conv_trim"
+    for i in range(10):
+        memory_store.save_message(conv_id, "user", f"Message {i} with enough words to use tokens", token_count=15)
+
+    messages = memory.load_messages(conv_id)
+    total_tokens = sum(count_tokens(m.content) for m in messages)
+    assert total_tokens <= config.max_tokens
+
+
+def test_delete_conversation():
+    conv_id = "test_conv_del"
+    memory_store.save_message(conv_id, "user", "Bye", token_count=5)
+    memory_store.delete_conversation(conv_id)
+
+    history = memory_store.load_history(conv_id)
+    assert len(history) == 0
