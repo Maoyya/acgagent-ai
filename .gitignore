@@ -7,3 +7,5 @@ dist/
 .venv/
 .env
 poetry.lock
+.idea/
+docx/
