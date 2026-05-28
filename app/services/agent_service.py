@@ -41,6 +41,7 @@ class AgentService:
 
     def update(self, agent_id: str, req: AgentUpdateRequest) -> Optional[AgentConfig]:
         """部分更新 Agent。只修改请求中显式传入的字段（exclude_unset=True）。"""
+        agent = agent_store.get(agent_id)
         if agent is None:
             return None
 
