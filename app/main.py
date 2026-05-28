@@ -1,3 +1,10 @@
+"""
+acgagent-ai 应用入口。
+
+FastAPI 应用，通过 lifespan 管理启动/关闭生命周期。
+启动时初始化数据目录和 ChromaDB，关闭时释放 ChromaDB 连接。
+所有 API 路由挂载在 /api/v1 前缀下，需携带 X-API-Key 认证。
+"""
 import logging
 from contextlib import asynccontextmanager
 
@@ -13,6 +20,16 @@ logger = logging.getLogger("acgagent-ai")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """应用生命周期管理。
+
+    启动时：
+    - 配置日志级别
+    - 创建数据子目录（如不存在）
+    - 初始化 ChromaDB 持久化客户端
+
+    关闭时：
+    - 释放 ChromaDB 客户端
+    """
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 
     for subdir in ["agents", "knowledge_bases", "documents", "tools", "chroma", "uploads"]:
@@ -47,6 +64,7 @@ app.include_router(v1_router)
 
 @app.get("/api/v1/health", tags=["system"])
 async def health_check():
+    """健康检查端点。无需 API Key 认证。检测 ChromaDB 连接状态。"""
     chroma_status = "not_initialized"
     try:
         from app.db.chroma_client import get_chroma

@@ -1,3 +1,8 @@
+"""
+API v1 路由汇总。
+
+所有子路由挂载在 /api/v1 前缀下，统一经过 API Key 认证。
+"""
 from fastapi import APIRouter, Depends
 from app.api.deps import verify_api_key
 from app.api.v1.chat import router as chat_router

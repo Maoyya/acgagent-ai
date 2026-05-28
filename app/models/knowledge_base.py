@@ -1,3 +1,9 @@
+"""
+知识库数据模型。
+
+知识库定义了 Embedding 配置和分块策略，用于 RAG 检索。
+每个知识库在 ChromaDB 中对应一个 collection（kb_{id}_chunks）。
+"""
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field

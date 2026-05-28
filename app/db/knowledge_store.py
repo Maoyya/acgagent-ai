@@ -1,3 +1,8 @@
+"""
+知识库 JSON 文件存储。
+
+每个知识库元数据保存为 data/knowledge_bases/{id}.json。
+"""
 import json
 from pathlib import Path
 from typing import Optional

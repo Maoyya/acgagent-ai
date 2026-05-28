@@ -1,3 +1,8 @@
+"""
+通用响应模型。
+
+所有 API 统一使用 Result<T> 包装响应，包含 code/message/data 三字段。
+"""
 from typing import TypeVar, Generic, Optional
 from pydantic import BaseModel
 

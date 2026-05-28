@@ -1,3 +1,9 @@
+"""
+自定义工具 JSON 文件存储。
+
+每个工具配置保存为 data/tools/{id}.json。
+仅存储用户自定义 API 工具，内置工具（calculator/web_search/knowledge_search）不经过此存储。
+"""
 import json
 from pathlib import Path
 from typing import Optional

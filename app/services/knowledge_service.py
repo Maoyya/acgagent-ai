@@ -1,3 +1,10 @@
+"""
+知识库管理服务。
+
+知识库是 RAG 检索的基础，包含 Embedding 配置和分块策略。
+每个知识库在 ChromaDB 中对应一个 collection（kb_{id}_chunks）。
+删除知识库时会同步清理 ChromaDB 中的向量数据。
+"""
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -38,6 +45,7 @@ class KnowledgeService:
         return knowledge_store.save(kb)
 
     def delete(self, kb_id: str) -> bool:
+        """删除知识库。同时清理 ChromaDB 中对应的 collection 和所有向量数据。"""
         from app.db.chroma_client import get_chroma
         try:
             get_chroma().delete_collection(name=f"kb_{kb_id}_chunks")

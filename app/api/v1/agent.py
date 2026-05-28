@@ -1,3 +1,6 @@
+"""
+Agent CRUD API 端点。
+"""
 from fastapi import APIRouter
 
 from app.models.agent import AgentCreateRequest, AgentUpdateRequest

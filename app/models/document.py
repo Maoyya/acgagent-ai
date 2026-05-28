@@ -1,3 +1,9 @@
+"""
+文档数据模型。
+
+文档属于知识库，上传后异步处理（解析→分块→向量化）。
+status 状态流转：processing → completed / failed。
+"""
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field

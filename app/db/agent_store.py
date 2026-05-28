@@ -1,3 +1,9 @@
+"""
+Agent JSON 文件存储。
+
+每个 Agent 配置保存为 data/agents/{id}.json。
+提供 list_all / get / save / delete 四个基本操作。
+"""
 import json
 import logging
 from pathlib import Path

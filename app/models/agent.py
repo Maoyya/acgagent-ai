@@ -1,3 +1,10 @@
+"""
+Agent 数据模型。
+
+AgentConfig 是核心实体，包含 LLM 配置、记忆策略、能力标签和关联资源。
+LLMConfig 通过 base_url 支持任意 OpenAI 兼容的模型提供商。
+MemoryConfig 支持 conversation_window（滑动窗口）和 none（无记忆）两种模式。
+"""
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field

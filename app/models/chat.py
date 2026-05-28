@@ -1,3 +1,9 @@
+"""
+对话请求/响应模型。
+
+ChatRequest: 对话请求，支持流式/同步模式
+ChatEvent: SSE 事件，类型包括 content/tool_call/tool_result/thinking/error/done
+"""
 from typing import Optional
 from pydantic import BaseModel
 

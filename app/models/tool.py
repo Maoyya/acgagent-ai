@@ -1,3 +1,10 @@
+"""
+工具数据模型。
+
+支持两类工具：
+- builtin: 内置工具（calculator/web_search/knowledge_search），无持久化配置
+- api: 自定义 API 工具，通过 ToolConfig 定义 HTTP 调用参数
+"""
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field

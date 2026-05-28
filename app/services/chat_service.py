@@ -1,3 +1,13 @@
+"""
+对话服务 — 系统核心。
+
+根据 Agent 的 capabilities 配置路由到三种对话模式：
+- workflow: LangGraph 工作流（支持 RAG + 多步编排）
+- tool_use: LLM + 工具绑定（LLM 自主决定是否调用工具）
+- chat: 纯 LLM 对话（无工具、无 RAG）
+
+所有流式响应使用 SSE 协议（text/event-stream）。
+"""
 import logging
 from typing import AsyncGenerator
 
@@ -13,6 +23,7 @@ logger = logging.getLogger("acgagent-ai")
 
 class ChatService:
     def _build_memory(self, agent_config: AgentConfig) -> ConversationMemory:
+        """根据 Agent 的 memory 配置创建记忆管理器。"""
         return ConversationMemory(agent_config.memory_config)
 
     async def stream_chat(
@@ -22,9 +33,11 @@ class ChatService:
         conversation_id: str = "",
         user_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
+        """对话入口。保存用户消息后根据能力路由到对应模式。"""
         memory = self._build_memory(agent_config)
         memory.save_user_message(conversation_id, message)
 
+        # 优先级：workflow > tool_use > 纯聊天
         if "workflow" in agent_config.capabilities:
             from app.core.workflow import AgentWorkflow
             workflow = AgentWorkflow(agent_config, memory, conversation_id)
@@ -42,6 +55,7 @@ class ChatService:
                 yield event
 
     async def _stream_plain(self, llm, agent_config, message, memory, conversation_id):
+        """纯聊天模式：直接流式调用 LLM，无工具绑定。"""
         messages = self._build_messages(agent_config, memory, message, conversation_id)
         full_content = ""
         try:
@@ -59,6 +73,12 @@ class ChatService:
             yield f"data: {error_event.model_dump_json(exclude_none=True)}\n\n"
 
     async def _stream_with_tools(self, llm, agent_config, message, memory, conversation_id):
+        """工具调用模式：将工具绑定到 LLM，LLM 在生成过程中可自主调用工具。
+
+        SSE 输出两类事件：
+        - content: LLM 生成的文本片段
+        - tool_call: LLM 决定调用工具时的事件（含工具名和参数）
+        """
         tools = self._get_tools(agent_config)
         llm_with_tools = llm.bind_tools(tools)
         messages = self._build_messages(agent_config, memory, message, conversation_id)
@@ -86,6 +106,11 @@ class ChatService:
             yield f"data: {error_event.model_dump_json(exclude_none=True)}\n\n"
 
     def _build_messages(self, agent_config, memory, message, conversation_id):
+        """构建发送给 LLM 的消息列表。
+
+        顺序：system_prompt → 会话历史（经 token 裁剪） → 当前用户消息。
+        这个顺序保证了系统提示词始终在最前面，历史消息保持时序。
+        """
         messages = []
         if agent_config.system_prompt:
             messages.append(SystemMessage(content=agent_config.system_prompt))
@@ -101,6 +126,7 @@ class ChatService:
         conversation_id: str = "",
         user_id: str | None = None,
     ) -> ChatCompletionVO:
+        """同步对话模式。等待 LLM 完整响应后一次性返回，不使用流式。"""
         memory = self._build_memory(agent_config)
         memory.save_user_message(conversation_id, message)
 
@@ -117,6 +143,10 @@ class ChatService:
             raise
 
     def _get_tools(self, agent_config: AgentConfig) -> list:
+        """根据 Agent 的 tool_ids 实例化对应工具并转换为 LangChain Tool 格式。
+
+        knowledge_search 工具需要关联知识库才能工作，未关联知识库时跳过。
+        """
         from app.tools.calculator import CalculatorTool
         from app.tools.web_search import WebSearchTool
         from app.tools.knowledge_search import KnowledgeSearchTool
@@ -133,6 +163,7 @@ class ChatService:
         return [t.to_langchain_tool() for t in tools]
 
     def _has_tools(self, agent_config: AgentConfig) -> bool:
+        """判断是否启用工具调用：需同时满足有工具 ID 且 capabilities 含 tool_use。"""
         return bool(agent_config.tool_ids) and "tool_use" in agent_config.capabilities
 
 

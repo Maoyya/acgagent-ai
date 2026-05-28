@@ -1,3 +1,4 @@
+"""网络搜索工具 — 预留实现，当前返回占位提示。"""
 from app.tools.base import BaseAgentTool
 
 
@@ -10,5 +11,6 @@ class WebSearchTool(BaseAgentTool):
         )
 
     def execute(self, **kwargs) -> str:
+        """搜索功能暂未实现，返回占位信息。"""
         query = kwargs.get("query", kwargs.get("keywords", ""))
         return f"[v1.0 搜索功能暂未实现] 搜索关键词: {query}"

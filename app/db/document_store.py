@@ -1,3 +1,8 @@
+"""
+文档 JSON 文件存储。
+
+按知识库分目录存储：data/documents/{kb_id}/{doc_id}.json。
+"""
 import json
 from pathlib import Path
 from typing import Optional

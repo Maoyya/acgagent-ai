@@ -1,3 +1,10 @@
+"""
+对话 API 端点。
+
+根据 stream 参数决定响应模式：
+- stream=true（默认）：返回 SSE 流式响应（text/event-stream）
+- stream=false：返回完整 JSON 响应
+"""
 from fastapi import APIRouter, Header
 from fastapi.responses import StreamingResponse
 
@@ -15,6 +22,7 @@ async def chat_completions(
     body: ChatRequest,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
 ):
+    """对话接口。先校验 Agent 存在且启用，再根据 stream 参数分流。"""
     agent_config = agent_service.get(agent_id)
     if agent_config is None:
         return Result.error(code=404, message=f"Agent not found: {agent_id}")
@@ -22,6 +30,7 @@ async def chat_completions(
         return Result.error(code=400, message=f"Agent is disabled: {agent_id}")
 
     if body.stream:
+        # SSE 流式响应：禁用缓冲确保实时推送
         return StreamingResponse(
             chat_service.stream_chat(
                 agent_config=agent_config,

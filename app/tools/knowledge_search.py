@@ -1,3 +1,9 @@
+"""
+知识库搜索工具。
+
+在 Agent 关联的知识库 ChromaDB collection 中检索相关文档片段。
+与 RAGRetriever 类似，但作为 Tool 被调用，由 LLM 自主决定何时搜索。
+"""
 import logging
 from app.tools.base import BaseAgentTool
 from app.db.chroma_client import get_chroma
@@ -15,6 +21,7 @@ class KnowledgeSearchTool(BaseAgentTool):
         self.knowledge_base_ids = knowledge_base_ids
 
     def execute(self, **kwargs) -> str:
+        """跨关联知识库检索，每个库返回 top 3 结果。"""
         query = kwargs.get("query", kwargs.get("question", ""))
         if not query:
             return "请提供搜索查询"
