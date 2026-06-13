@@ -12,7 +12,10 @@ def test_warn_default_key_logs_when_default(caplog, monkeypatch):
     monkeypatch.setattr(settings, "api_key", "dev-api-key")
     caplog.set_level(logging.WARNING)
     main._warn_default_api_key()
-    assert any(rec.levelno == logging.WARNING for rec in caplog.records)
+    assert any(
+        rec.levelno == logging.WARNING and "default API key" in rec.getMessage()
+        for rec in caplog.records
+    )
 
 
 def test_warn_default_key_silent_when_real(caplog, monkeypatch):
