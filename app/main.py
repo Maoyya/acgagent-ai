@@ -18,6 +18,14 @@ from app.api.v1.router import router as v1_router
 logger = logging.getLogger("acgagent-ai")
 
 
+def _warn_default_api_key() -> None:
+    """api_key 仍为默认值时打印告警（生产应通过 ACG_AI_API_KEY 覆盖）。"""
+    if settings.api_key == "dev-api-key":
+        logger.warning(
+            "Using default API key 'dev-api-key'; set ACG_AI_API_KEY in production."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理。
@@ -31,6 +39,7 @@ async def lifespan(app: FastAPI):
     - 释放 ChromaDB 客户端
     """
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+    _warn_default_api_key()
 
     for subdir in ["agents", "knowledge_bases", "documents", "tools", "chroma", "uploads"]:
         (settings.data_dir / subdir).mkdir(parents=True, exist_ok=True)
