@@ -1,6 +1,6 @@
 # acgagent-ai 技术架构文档
 
-> 版本：1.0.0 | 更新日期：2026-05-28
+> 版本：1.1.0 | 更新日期：2026-06-21
 
 ---
 
@@ -73,6 +73,11 @@ acgagent-ai 是一个 AI Agent 引擎服务，提供 Agent 管理、对话（流
 **中间件层** (`app/api/middleware.py`)
 - CORS 全放通
 - 请求/响应日志中间件
+
+**API Key 鉴权**（`app/api/deps.py:verify_api_key`，作为 `/api/v1` 路由依赖注入，非严格意义上的中间件）
+- 所有 `/api/v1/*` 路由默认依赖该校验；`/api/v1/health` 免鉴权
+- 缺失/空 `X-API-Key` → 401（Missing API key）
+- 比对不符 → 401（Invalid API key），比对采用 `secrets.compare_digest` 常数时间比较，防计时侧信道
 
 **Service 层** (`app/services/`)
 - 业务逻辑编排，不直接操作存储
@@ -223,7 +228,7 @@ Docker Container (Python 3.11-slim)
 | ------------------- | ------------- | ------------------ |
 | ACG_AI_HOST         | 0.0.0.0      | 监听地址           |
 | ACG_AI_PORT         | 8100          | 监听端口           |
-| ACG_AI_API_KEY      | dev-api-key   | API 认证密钥       |
+| ACG_AI_API_KEY      | dev-api-key   | API 认证密钥；启动时若仍为默认值会打印告警，生产环境须通过 `.env`/环境变量覆盖（已 gitignore，不入库） |
 | ACG_AI_DATA_DIR     | ./data        | 数据目录           |
 | ACG_AI_LOG_LEVEL    | INFO          | 日志级别           |
 | ACG_AI_DEBUG        | false         | 调试模式           |

@@ -1,6 +1,6 @@
 # acgagent-ai 业务流程文档
 
-> 版本：1.0.0 | 更新日期：2026-05-28
+> 版本：1.1.0 | 更新日期：2026-06-21
 
 ---
 
@@ -334,7 +334,7 @@ GET /api/v1/health（无需 API Key）
 | --------------------- | ------------------------------------------------ |
 | Agent 不存在          | 返回 `Result.error(code=404)`                    |
 | Agent 已禁用          | 返回 `Result.error(code=400)`                    |
-| API Key 无效          | HTTP 401                                         |
+| API Key 缺失或无效    | HTTP 401（缺失/空 key 或比对不符均返回 401，比对采用常数时间 `secrets.compare_digest`） |
 | 知识库不存在          | 返回 `Result.error(code=404)`                    |
 | 文档处理失败          | DocumentVO.status → "failed"，记录 error_message |
 | LLM 调用异常          | SSE 发送 `error` 事件（code=500）                 |
@@ -394,7 +394,7 @@ GET /api/v1/health（无需 API Key）
 | 配置           | 位置               | 默认值                          | 说明               |
 | -------------- | ------------------ | ------------------------------- | ------------------ |
 | 服务端口       | ACG_AI_PORT        | 8100                            | Uvicorn 监听端口   |
-| API Key        | ACG_AI_API_KEY     | dev-api-key                     | 接口认证密钥       |
+| API Key        | ACG_AI_API_KEY     | dev-api-key                     | 接口认证密钥；启动时若仍为默认值会打印告警，生产环境须通过 `.env`/环境变量覆盖 |
 | 数据目录       | ACG_AI_DATA_DIR    | ./data                          | 所有持久化数据     |
 | 记忆窗口       | Agent.memory_config | 8000 tokens                    | 单会话上下文上限   |
 | 分块大小       | KB.chunk_config    | 500 字符                        | 文档切分粒度       |
