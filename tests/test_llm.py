@@ -99,3 +99,91 @@ def test_llm_key_for_does_not_collide_with_method_name():
     绕过 fail-loud——本该抛 ValueError 的"未配置"被静默吞掉。
     """
     assert settings.llm_key_for("for") == ""
+
+
+# ---------- ping_llm 连通性校验 ----------
+
+import httpx
+import openai
+from unittest.mock import MagicMock
+
+from app.core.llm import ping_llm
+
+
+def _ping_config(model="deepseek-chat", api_key="sk-real"):
+    return LLMConfig(
+        provider="deepseek", model=model,
+        base_url="https://api.deepseek.com/v1", api_key=api_key,
+    )
+
+
+def _http_resp(status_code):
+    """构造 openai 状态异常所需的 httpx.Response。"""
+    return httpx.Response(status_code=status_code, request=httpx.Request("POST", "https://api.test/v1"))
+
+
+def _mock_chat_model(monkeypatch, *, invoke_return=None, invoke_side_effect=None):
+    """把 app.core.llm.ChatOpenAI 替换为一个返回假实例的工厂，便于控制 invoke 行为。"""
+    fake = MagicMock()
+    fake.invoke.return_value = invoke_return
+    fake.invoke.side_effect = invoke_side_effect
+    monkeypatch.setattr("app.core.llm.ChatOpenAI", lambda **kw: fake)
+    return fake
+
+
+def test_ping_llm_success(monkeypatch):
+    """invoke 正常返回 → ping_llm 不抛（连通性 OK）。"""
+    from langchain_core.messages import AIMessage
+    fake = _mock_chat_model(monkeypatch, invoke_return=AIMessage(content="ok"))
+    ping_llm(_ping_config())  # 不抛即通过
+    fake.invoke.assert_called_once()
+
+
+def test_ping_llm_translates_auth_error(monkeypatch):
+    """鉴权失败 → ValueError 含「鉴权失败」。"""
+    _mock_chat_model(monkeypatch, invoke_side_effect=openai.AuthenticationError(
+        message="bad key", response=_http_resp(401), body=None))
+    with pytest.raises(ValueError) as exc:
+        ping_llm(_ping_config())
+    assert "鉴权失败" in str(exc.value)
+
+
+def test_ping_llm_translates_model_not_found(monkeypatch):
+    """模型名错 → ValueError 含模型名与「模型」字样。"""
+    _mock_chat_model(monkeypatch, invoke_side_effect=openai.NotFoundError(
+        message="no model", response=_http_resp(404), body=None))
+    with pytest.raises(ValueError) as exc:
+        ping_llm(_ping_config(model="deepseek-chet"))
+    assert "模型" in str(exc.value) and "deepseek-chet" in str(exc.value)
+
+
+def test_ping_llm_translates_connection_error(monkeypatch):
+    """连接错误/超时 → ValueError 含「base_url」。"""
+    _mock_chat_model(monkeypatch, invoke_side_effect=openai.APIConnectionError(
+        message="conn", request=_http_resp(500).request))
+    with pytest.raises(ValueError) as exc:
+        ping_llm(_ping_config())
+    assert "base_url" in str(exc.value)
+
+
+def test_ping_llm_ratelimit_is_available(monkeypatch):
+    """限流视为可用（已证明可联通）→ 不抛。"""
+    _mock_chat_model(monkeypatch, invoke_side_effect=openai.RateLimitError(
+        message="limit", response=_http_resp(429), body=None))
+    ping_llm(_ping_config())  # 不抛
+
+
+def test_ping_llm_wraps_unknown_error(monkeypatch):
+    """未预期异常 → 包装成 ValueError（Fail Loud，不静默放行）。"""
+    _mock_chat_model(monkeypatch, invoke_side_effect=RuntimeError("boom"))
+    with pytest.raises(ValueError) as exc:
+        ping_llm(_ping_config())
+    assert "LLM 校验失败" in str(exc.value)
+
+
+def test_ping_llm_propagates_missing_key(monkeypatch):
+    """key 不可解析 → resolve_api_key 的 ValueError 原样传播（不被吞成通用错误）。"""
+    monkeypatch.setattr(settings, "llm_key_deepseek", "")
+    with pytest.raises(ValueError) as exc:
+        ping_llm(_ping_config(api_key=""))
+    assert "ACG_AI_LLM_KEY_DEEPSEEK" in str(exc.value)
