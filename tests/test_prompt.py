@@ -339,3 +339,74 @@ async def test_generate_meta_llm_not_configured():
     )
     assert result.code == 500
     assert "not configured" in result.message
+
+
+@pytest.mark.asyncio
+async def test_generate_endpoint_happy(client, auth_headers):
+    """POST /prompts/generate 成功返回信封结构与生成结果。"""
+    _wire_fakes(structured_passed=True)
+    resp = await client.post(
+        "/api/v1/prompts/generate",
+        json={"user_hints": ["客服"], "mode": "acg"},
+        headers={**auth_headers, "X-User-Id": "u_api"},
+    )
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["code"] == 200
+    assert body["data"]["system_prompt"] == "生成的系统提示词"
+    assert body["data"]["moderation"]["passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_generate_endpoint_blocked_returns_403_envelope(client, auth_headers):
+    """校验不通过：HTTP 200，body code=403，data 带原因——这是给 Java 的契约。"""
+    _wire_fakes(structured_passed=False, mode="compliant")
+    resp = await client.post(
+        "/api/v1/prompts/generate",
+        json={"user_hints": ["x"], "mode": "compliant"},
+        headers=auth_headers,
+    )
+    body = resp.json()
+    assert resp.status_code == 200  # 业务码在 body，非 HTTP 状态
+    assert body["code"] == 403
+    assert body["message"] == "blocked"
+    assert body["data"]["passed"] is False
+
+
+@pytest.mark.asyncio
+async def test_estimate_endpoint(client, auth_headers):
+    """POST /prompts/estimate 纯计算返回 token 估算（无需 LLM）。"""
+    resp = await client.post(
+        "/api/v1/prompts/estimate",
+        json={"system_prompt": "你是一名助手", "user_hints": ["简洁"]},
+        headers=auth_headers,
+    )
+    body = resp.json()
+    assert body["code"] == 200
+    assert body["data"]["prompt_tokens"] > 0
+    assert body["data"]["est_completion_tokens"] == 0
+
+
+@pytest.mark.asyncio
+async def test_moderate_endpoint(client, auth_headers):
+    """POST /prompts/moderate 始终返回裁决（code=200），由调用方读 passed。"""
+    _wire_fakes(structured_passed=False, mode="acg")
+    resp = await client.post(
+        "/api/v1/prompts/moderate",
+        json={"system_prompt": "含暴力内容", "mode": "acg"},
+        headers=auth_headers,
+    )
+    body = resp.json()
+    assert body["code"] == 200
+    assert body["data"]["passed"] is False
+
+
+@pytest.mark.asyncio
+async def test_generate_invalid_mode_returns_422(client, auth_headers):
+    """mode 非法时 FastAPI 校验层返回 HTTP 422。"""
+    resp = await client.post(
+        "/api/v1/prompts/generate",
+        json={"user_hints": ["x"], "mode": "bogus"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
