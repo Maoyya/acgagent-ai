@@ -71,6 +71,14 @@ ACG_AI_META_LLM_MODEL=deepseek-chat
 ACG_AI_META_LLM_BASE_URL=https://api.deepseek.com/v1
 ACG_AI_META_LLM_API_KEY=sk-xxxxxxxx   # ⚠️ 缺失时 generate / moderate 会直接返回 500
 
+# —— 对话 / Agent LLM 密钥（方案 B：按 provider 分键）——
+# agent 的 llm_config.api_key 为空时按 provider 从这里取（app/core/llm.py）；
+# agent 自带 api_key 非空则优先用自带的。命名：ACG_AI_LLM_KEY_<PROVIDER 大写>。
+ACG_AI_LLM_KEY_DEEPSEEK=
+ACG_AI_LLM_KEY_ZHIPU=                 # 用智谱做对话模型时填这里
+ACG_AI_LLM_KEY_DOUBAO=
+ACG_AI_LLM_KEY_QWEN=
+
 # —— 服务 / 运行时（均有默认值，按需覆盖）——
 # ACG_AI_HOST=0.0.0.0
 # ACG_AI_PORT=8100
@@ -83,6 +91,7 @@ ACG_AI_META_LLM_API_KEY=sk-xxxxxxxx   # ⚠️ 缺失时 generate / moderate 会
 | ------------------------ | ------------------------------- | -------------------------------------- |
 | `ACG_AI_API_KEY`         | `dev-api-key`                   | 启动时若仍为默认值会打印 WARNING       |
 | `ACG_AI_META_LLM_API_KEY`| （空）                          | 必填，否则 `generate`/`moderate` 报 500 |
+| `ACG_AI_LLM_KEY_<PROVIDER>`| （空）                        | 对话/Agent LLM 按 provider 分键（DEEPSEEK/ZHIPU/DOUBAO/QWEN），见 ini 注释 |
 | `ACG_AI_PORT`            | `8100`                          | 修改后启动命令和访问地址同步改         |
 | `ACG_AI_LOG_LEVEL`       | `INFO`                          | 调试可设 `DEBUG`                       |
 
