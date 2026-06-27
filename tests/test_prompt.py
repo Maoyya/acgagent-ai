@@ -193,3 +193,27 @@ async def test_moderator_capability_rule_injected_when_caps_given():
     joined = _joined(fake.last_messages)
     assert "chat" in joined and "rag" in joined, "应列出能力边界"
     assert "能力" in joined, "应注入不超能力约束"
+
+
+@pytest.mark.asyncio
+async def test_builder_returns_llm_content():
+    """Builder 应把 LLM 返回的正文作为 system_prompt。"""
+    from app.core.prompt_builder import PromptBuilder
+    from app.models.prompt import PromptMode
+
+    fake = FakeLLM(content="你是一名专业的客服助手。")
+    result = await PromptBuilder().build(fake, ["专业客服"], PromptMode.compliant, [])
+    assert result == "你是一名专业的客服助手。"
+
+
+@pytest.mark.asyncio
+async def test_builder_passes_hints_and_mode_to_llm():
+    """Builder 应把用户 hints 与 mode 风格约束注入元提示词。"""
+    from app.core.prompt_builder import PromptBuilder
+    from app.models.prompt import PromptMode
+
+    fake = FakeLLM(content="x")
+    await PromptBuilder().build(fake, ["毒舌客服", "回答简洁"], PromptMode.acg, ["chat"])
+    joined = _joined(fake.last_messages)
+    assert "毒舌客服" in joined and "回答简洁" in joined, "应包含用户 hints"
+    assert "二次元" in joined, "acg 模式应给出二次元风格指引"
