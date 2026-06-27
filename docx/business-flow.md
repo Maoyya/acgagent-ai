@@ -35,15 +35,28 @@ Agent 是系统的核心实体，定义了 AI 助手的人格、模型、能力�
   │                              │
   │  POST /api/v1/agents         │
   │  {name, llm_config, ...}     │
+  │  ?validate=true|false        │
   │ ──────────────────────────>  │
   │                              │  1. 校验请求参数
-  │                              │  2. 生成唯一 ID (12位 hex)
-  │                              │  3. 构建 AgentConfig 对象
-  │                              │  4. 保存到 data/agents/{id}.json
+  │                              │  2. 可用性校验（见下）
+  │                              │  3. 生成唯一 ID (12位 hex)
+  │                              │  4. 构建 AgentConfig 对象
+  │                              │  5. 保存到 data/agents/{id}.json
   │                              │
   │  {code:200, data: AgentConfig}
   │ <──────────────────────────  │
+  │                              │
+  │  [校验失败]                  │
+  │  {code:400, message: <原因>} │  ← 不落库
+  │ <──────────────────────────  │
 ```
+
+**可用性校验（创建/更新共用）：**
+
+1. **引用完整性**（始终执行，不可豁免）：`knowledge_base_ids` / `tool_ids` 必须实际存在（内置工具以 `BUILTIN_TOOL_IDS` 为准，自定义工具查 `data/tools/`）。缺失即拒。
+2. **LLM 连通性 ping**（`?validate=true` 默认开启）：用 Agent 的 `llm_config` 发一次 `max_tokens=1` 的最小 completion 探活（`ping_llm`）。鉴权失败 / 模型不存在 / 无法连接 base_url 等任一失败即拒；`RateLimitError` 视为可达。`?validate=false` 可豁免本次 ping，**但引用校验仍执行**。
+
+校验任一失败：路由返回 `Result.error(code=400, message=<中文可操作原因>)`，**不落库**。
 
 **请求参数（AgentCreateRequest）：**
 
@@ -60,7 +73,9 @@ Agent 是系统的核心实体，定义了 AI 助手的人格、模型、能力�
 
 #### 3.1.2 更新 Agent
 
-调用方提交部分更新字段（`AgentUpdateRequest`），系统合并到已有配置，更新 `updated_at` 时间戳后保存。
+调用方提交部分更新字段（`AgentUpdateRequest`），系统合并到已有配置，更新 `updated_at` 时间戳后保存。支持 `?validate=true|false`。
+
+**更新为完整复检**：合并后重跑与创建一致的可用性校验（引用完整性 + LLM ping，规则同 3.1.1）。即使只改 `name` 也会重新 ping + 校验引用，保证落库的 Agent 一定可用。校验失败返回 `code=400` 且**不 save**，旧 Agent 配置原子不变。
 
 #### 3.1.3 删除 Agent
 
@@ -398,6 +413,7 @@ Java 校验用户已保存的模板时单独调用，不走生成：正常返回
 | --------------------- | ------------------------------------------------ |
 | Agent 不存在          | 返回 `Result.error(code=404)`                    |
 | Agent 已禁用          | 返回 `Result.error(code=400)`                    |
+| Agent 创建/更新可用性校验失败 | 返回 `Result.error(code=400)`（LLM ping 或引用校验失败，不落库；`?validate=false` 仅豁免 ping） |
 | API Key 缺失或无效    | HTTP 401（缺失/空 key 或比对不符均返回 401，比对采用常数时间 `secrets.compare_digest`） |
 | 知识库不存在          | 返回 `Result.error(code=404)`                    |
 | 文档处理失败          | DocumentVO.status → "failed"，记录 error_message |
