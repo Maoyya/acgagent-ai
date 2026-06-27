@@ -22,6 +22,12 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    # meta-LLM：用于提示词生成与合规校验（服务级基础设施任务，不绑定具体 Agent）
+    meta_llm_provider: str = "deepseek"
+    meta_llm_model: str = "deepseek-chat"
+    meta_llm_base_url: str = "https://api.deepseek.com/v1"
+    meta_llm_api_key: str = ""   # 缺失时 generate/moderate 返回 500
+
     model_config = {"env_prefix": "ACG_AI_", "env_file": ".env", "env_file_encoding": "utf-8"}
 
 

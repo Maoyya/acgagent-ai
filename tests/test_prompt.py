@@ -217,3 +217,125 @@ async def test_builder_passes_hints_and_mode_to_llm():
     joined = _joined(fake.last_messages)
     assert "毒舌客服" in joined and "回答简洁" in joined, "应包含用户 hints"
     assert "二次元" in joined, "acg 模式应给出二次元风格指引"
+
+
+@pytest.fixture(autouse=True)
+def _reset_prompt_service_llm():
+    """每个用例重置 prompt_service 的 LLM 缓存，并还原 _wire_fakes 替换的 _build_*_llm。
+
+    _build_*_llm 本是类方法；_wire_fakes 用实例属性覆盖它（阴影类方法）。
+    删除实例属性即可让类方法重新生效，保证测试顺序无关、不泄漏到下一个用例。
+    """
+    from app.services.prompt_service import prompt_service
+    prompt_service._gen_llm = None
+    prompt_service._mod_llm = None
+    yield
+    prompt_service._gen_llm = None
+    prompt_service._mod_llm = None
+    for attr in ("_build_gen_llm", "_build_mod_llm"):
+        if attr in prompt_service.__dict__:
+            delattr(prompt_service, attr)
+
+
+def _wire_fakes(gen_content="生成的系统提示词", structured_passed=True, mode=None):
+    """把 prompt_service 的 meta-LLM 构造方法替换为 FakeLLM。"""
+    from app.services.prompt_service import prompt_service
+    from app.models.prompt import ModerationVerdict, PromptMode
+
+    resolved_mode = mode or PromptMode.acg
+    # 实例属性赋值不触发描述符绑定，故 lambda 不接受 self，与服务侧 self._build_*_llm() 对齐。
+    prompt_service._build_gen_llm = lambda: FakeLLM(content=gen_content)
+    prompt_service._build_mod_llm = lambda: FakeLLM(
+        structured=ModerationVerdict(passed=structured_passed, mode=resolved_mode)
+    )
+
+
+@pytest.mark.asyncio
+async def test_generate_happy_path():
+    """通过校验时：返回 code=200，含提示词/裁决/估算，且偏好落库。"""
+    from app.services.prompt_service import prompt_service
+    from app.db.preference_store import preference_store
+    from app.models.prompt import PromptGenerateRequest, PromptMode
+
+    _wire_fakes(structured_passed=True)
+    before = len(preference_store.list_by_user("u_happy"))
+    result = await prompt_service.generate(
+        PromptGenerateRequest(user_hints=["客服"], mode=PromptMode.acg), user_id="u_happy"
+    )
+    assert result.code == 200
+    assert result.data.system_prompt == "生成的系统提示词"
+    assert result.data.moderation.passed is True
+    assert result.data.estimate.prompt_tokens > 0
+    after = len(preference_store.list_by_user("u_happy"))
+    assert after == before + 1, "成功生成应写入偏好"
+
+
+@pytest.mark.asyncio
+async def test_generate_blocked_returns_403_with_verdict():
+    """校验不通过：code=403, message=blocked, data 为裁决结果（含原因）。"""
+    from app.services.prompt_service import prompt_service
+    from app.models.prompt import PromptGenerateRequest, PromptMode
+
+    _wire_fakes(structured_passed=False, mode=PromptMode.compliant)
+    result = await prompt_service.generate(
+        PromptGenerateRequest(user_hints=["x"], mode=PromptMode.compliant), user_id="u_block"
+    )
+    assert result.code == 403
+    assert result.message == "blocked"
+    assert result.data.passed is False
+
+
+@pytest.mark.asyncio
+async def test_generate_skips_preference_when_blocked():
+    """校验不通过时不写偏好——避免把不合规内容沉淀进推荐库。"""
+    from app.services.prompt_service import prompt_service
+    from app.db.preference_store import preference_store
+    from app.models.prompt import PromptGenerateRequest, PromptMode
+
+    _wire_fakes(structured_passed=False)
+    before = len(preference_store.list_by_user("u_nopref"))
+    await prompt_service.generate(
+        PromptGenerateRequest(user_hints=["x"], mode=PromptMode.acg), user_id="u_nopref"
+    )
+    assert len(preference_store.list_by_user("u_nopref")) == before
+
+
+@pytest.mark.asyncio
+async def test_preference_failure_does_not_block_generate(monkeypatch):
+    """偏好写入抛异常时，generate 仍正常返回——验证 best-effort。"""
+    from app.services.prompt_service import prompt_service
+    from app.db.preference_store import preference_store
+    from app.models.prompt import PromptGenerateRequest, PromptMode
+
+    _wire_fakes(structured_passed=True)
+
+    def boom(*a, **k):
+        raise RuntimeError("chroma down")
+
+    monkeypatch.setattr(preference_store, "record", boom)
+    result = await prompt_service.generate(
+        PromptGenerateRequest(user_hints=["x"], mode=PromptMode.acg), user_id="u_ok"
+    )
+    assert result.code == 200
+    assert result.data.system_prompt == "生成的系统提示词"
+
+
+@pytest.mark.asyncio
+async def test_generate_meta_llm_not_configured():
+    """meta-LLM api_key 缺失时返回 code=500（而非抛异常拖垮服务）。"""
+    from app.services.prompt_service import prompt_service, MetaLLMNotConfigured
+    from app.models.prompt import PromptGenerateRequest, PromptMode
+
+    prompt_service._gen_llm = None
+    prompt_service._mod_llm = None
+
+    def raise_unconfigured():
+        raise MetaLLMNotConfigured("meta llm not configured")
+
+    prompt_service._build_gen_llm = raise_unconfigured
+    prompt_service._build_mod_llm = raise_unconfigured
+    result = await prompt_service.generate(
+        PromptGenerateRequest(user_hints=["x"], mode=PromptMode.acg), user_id="u_x"
+    )
+    assert result.code == 500
+    assert "not configured" in result.message
