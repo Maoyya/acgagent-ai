@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     llm_key_doubao: str = ""
     llm_key_qwen: str = ""
 
+    # 图片存储（图生文）：物理落盘根目录 + 对外/DB 引用 URL 前缀。均可由 .env 覆盖（不锁死）。
+    # 发送时转 base64 内联，云端模型不真的拉图——base_url 仅作引用。
+    storage_root_dir: Path = Path("D:/acgagent-ai/uploads")
+    storage_base_url: str = "http://localhost:8100/uploads"
+
     model_config = {
         "env_prefix": "ACG_AI_",
         "env_file": ".env",
