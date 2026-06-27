@@ -14,6 +14,7 @@ from typing import AsyncGenerator
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.llm import create_chat_model
+from app.services import image_service
 from app.core.memory import ConversationMemory
 from app.models.agent import AgentConfig
 from app.models.chat import ChatEvent, ChatCompletionVO, UsageInfo
@@ -32,12 +33,14 @@ class ChatService:
         message: str,
         conversation_id: str = "",
         user_id: str | None = None,
+        images: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
         """对话入口。保存用户消息后根据能力路由到对应模式。"""
         memory = self._build_memory(agent_config)
         memory.save_user_message(conversation_id, message)
 
         # 优先级：workflow > tool_use > 纯聊天
+        # 注意：workflow/RAG 路径本轮不支持图（spec §7），images 不传入。
         if "workflow" in agent_config.capabilities:
             from app.core.workflow import AgentWorkflow
             workflow = AgentWorkflow(agent_config, memory, conversation_id)
@@ -48,15 +51,15 @@ class ChatService:
         llm = create_chat_model(agent_config.llm_config)
 
         if self._has_tools(agent_config):
-            async for event in self._stream_with_tools(llm, agent_config, message, memory, conversation_id):
+            async for event in self._stream_with_tools(llm, agent_config, message, memory, conversation_id, images):
                 yield event
         else:
-            async for event in self._stream_plain(llm, agent_config, message, memory, conversation_id):
+            async for event in self._stream_plain(llm, agent_config, message, memory, conversation_id, images):
                 yield event
 
-    async def _stream_plain(self, llm, agent_config, message, memory, conversation_id):
+    async def _stream_plain(self, llm, agent_config, message, memory, conversation_id, images=None):
         """纯聊天模式：直接流式调用 LLM，无工具绑定。"""
-        messages = self._build_messages(agent_config, memory, message, conversation_id)
+        messages = self._build_messages(agent_config, memory, message, conversation_id, images)
         full_content = ""
         try:
             async for chunk in llm.astream(messages):
@@ -72,7 +75,7 @@ class ChatService:
             error_event = ChatEvent(type="error", code=500, message=str(e))
             yield f"data: {error_event.model_dump_json(exclude_none=True)}\n\n"
 
-    async def _stream_with_tools(self, llm, agent_config, message, memory, conversation_id):
+    async def _stream_with_tools(self, llm, agent_config, message, memory, conversation_id, images=None):
         """工具调用模式：将工具绑定到 LLM，LLM 在生成过程中可自主调用工具。
 
         SSE 输出两类事件：
@@ -81,7 +84,7 @@ class ChatService:
         """
         tools = self._get_tools(agent_config)
         llm_with_tools = llm.bind_tools(tools)
-        messages = self._build_messages(agent_config, memory, message, conversation_id)
+        messages = self._build_messages(agent_config, memory, message, conversation_id, images)
         full_content = ""
 
         try:
@@ -105,18 +108,19 @@ class ChatService:
             error_event = ChatEvent(type="error", code=500, message=str(e))
             yield f"data: {error_event.model_dump_json(exclude_none=True)}\n\n"
 
-    def _build_messages(self, agent_config, memory, message, conversation_id):
+    def _build_messages(self, agent_config, memory, message, conversation_id, images=None):
         """构建发送给 LLM 的消息列表。
 
         顺序：system_prompt → 会话历史（经 token 裁剪） → 当前用户消息。
-        这个顺序保证了系统提示词始终在最前面，历史消息保持时序。
+        当前用户消息的 content 由 image_service.build_message_content 组装：
+        无图返回纯字符串（零回归），有图返回多模态 list（图生文）。
         """
         messages = []
         if agent_config.system_prompt:
             messages.append(SystemMessage(content=agent_config.system_prompt))
         history = memory.load_messages(conversation_id)
         messages.extend(history)
-        messages.append(HumanMessage(content=message))
+        messages.append(HumanMessage(content=image_service.build_message_content(message, images)))
         return messages
 
     async def sync_chat(
@@ -125,13 +129,14 @@ class ChatService:
         message: str,
         conversation_id: str = "",
         user_id: str | None = None,
+        images: list[str] | None = None,
     ) -> ChatCompletionVO:
         """同步对话模式。等待 LLM 完整响应后一次性返回，不使用流式。"""
         memory = self._build_memory(agent_config)
         memory.save_user_message(conversation_id, message)
 
         llm = create_chat_model(agent_config.llm_config)
-        messages = self._build_messages(agent_config, memory, message, conversation_id)
+        messages = self._build_messages(agent_config, memory, message, conversation_id, images)
 
         try:
             response = await llm.ainvoke(messages)
