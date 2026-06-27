@@ -26,3 +26,24 @@ def test_cost_estimate_defaults():
     e = CostEstimate(prompt_tokens=42, model="deepseek-chat")
     assert e.est_completion_tokens == 0
     assert e.prompt_tokens == 42
+
+
+def test_estimate_scales_with_prompt_length():
+    """提示词越长，估算的 prompt_tokens 越大——验证估算是真实的，不是常数。"""
+    from app.core.cost_estimator import CostEstimator
+    est = CostEstimator(model="deepseek-chat")
+    short = est.estimate("你好", [])
+    long = est.estimate("你好" * 500, [])
+    assert short.prompt_tokens > 0
+    assert long.prompt_tokens > short.prompt_tokens
+
+
+def test_estimate_includes_user_hints_and_zero_completion():
+    """估算应把用户 hints 计入；一期 est_completion_tokens 恒为 0；model 回显。"""
+    from app.core.cost_estimator import CostEstimator
+    est = CostEstimator(model="deepseek-chat")
+    without_hints = est.estimate("系统提示词正文", [])
+    with_hints = est.estimate("系统提示词正文", ["要求一", "要求二"])
+    assert with_hints.prompt_tokens > without_hints.prompt_tokens
+    assert with_hints.est_completion_tokens == 0
+    assert with_hints.model == "deepseek-chat"
