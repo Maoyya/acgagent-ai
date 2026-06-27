@@ -28,7 +28,31 @@ class Settings(BaseSettings):
     meta_llm_base_url: str = "https://api.deepseek.com/v1"
     meta_llm_api_key: str = ""   # 缺失时 generate/moderate 返回 500
 
-    model_config = {"env_prefix": "ACG_AI_", "env_file": ".env", "env_file_encoding": "utf-8"}
+    # 对话 / Agent LLM 密钥（方案 B：按 provider 分键，由 app/core/llm.py 的 resolve_api_key 消费）。
+    # 对应环境变量 ACG_AI_LLM_KEY_<PROVIDER 大写>。新增 provider 需在此声明字段（fail-loud）。
+    llm_key_deepseek: str = ""
+    llm_key_zhipu: str = ""
+    llm_key_doubao: str = ""
+    llm_key_qwen: str = ""
+
+    model_config = {
+        "env_prefix": "ACG_AI_",
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        # 未知 ACG_AI_* 变量启动即 ValidationError（fail loud，Rule 12）。
+        # ACG_AI_LLM_KEY_<PROVIDER> 已声明为上面的字段，不会被当作 extra。
+        "extra": "forbid",
+    }
+
+    def llm_key_for(self, provider: str) -> str:
+        """按 provider 名取对话 LLM 密钥（对应 ACG_AI_LLM_KEY_<PROVIDER>）。
+
+        未知 provider（无对应字段）返回 ""，由 resolve_api_key 判定"未配置"并抛错。
+        """
+        key = getattr(self, f"llm_key_{provider.lower()}", "")
+        # 防御属性碰撞（A1）：provider 名若等于某已存在属性的后缀（如方法名 'for'），
+        # getattr 会返回该属性/方法（truthy）而非 ""，会被 resolve_api_key 误当 key。
+        return key if isinstance(key, str) else ""
 
 
 settings = Settings()

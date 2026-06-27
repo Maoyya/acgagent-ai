@@ -8,6 +8,7 @@
 from fastapi import APIRouter, Header
 from fastapi.responses import StreamingResponse
 
+from app.core.llm import resolve_api_key
 from app.models.chat import ChatRequest
 from app.models.common import Result
 from app.services.chat_service import chat_service
@@ -28,6 +29,13 @@ async def chat_completions(
         return Result.error(code=404, message=f"Agent not found: {agent_id}")
     if agent_config.status != 1:
         return Result.error(code=400, message=f"Agent is disabled: {agent_id}")
+
+    # 预检 LLM key 可解析性：缺失则在分流前返回受控 500 信封，避免 ValueError
+    # 在 sync 路径裸奔成无信封 500、或在 stream 的 async gen 中途崩溃（C1/C2）。
+    try:
+        resolve_api_key(agent_config.llm_config.provider, agent_config.llm_config.api_key)
+    except ValueError as e:
+        return Result.error(code=500, message=str(e))
 
     if body.stream:
         # SSE 流式响应：禁用缓冲确保实时推送
