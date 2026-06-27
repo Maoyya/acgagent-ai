@@ -22,7 +22,7 @@
 | ① | 图片如何交给云端视觉模型 | **发送时读本地文件转 base64 data URL 内联** | 云端模型（厂商服务器）无法访问本机/内网 URL；本地开发阶段只有 base64 稳。DB 里仍存 URL 作为引用。 |
 | ② | 存储 URL/根目录配置方式 | **复用现有 `.env` + pydantic-settings**（放弃 yml） | 项目纯 `.env`、`extra="forbid"`；引入 yml 是新模式（需 PyYAML）。遵循一致性 > 引入新约定（Rule 7/11）。 |
 | ③ | 历史图片轮次是否在后续轮次重发 | **仅当前轮有效**；memory 只存用户文字，图片不入记忆 | 重发历史图会导致 token 爆炸；图生文多为单轮场景。省 token、实现简单。后续轮次拿不到历史图是预期行为。 |
-| ④ | 哪些 Agent 可收图 | **所有 Agent 透传**，不加 vision capability 标志 | 最简、最「通用」；配了视觉模型即可用，配纯文本模型由 provider 报错透出。 |
+| ④ | 哪些 Agent 可收图 | **所有 Agent 透传**，不加 vision capability 标志；图片输入**完全可选** | 最简、最「通用」。`images` 默认空 = 纯文本对话逐字一致（零回归）。是否真能看图取决于用户配的模型：配视觉模型可用，配纯文本模型由 provider 报错透出。 |
 | ⑤ | 上传流程形状 | **独立上传端点 + ChatRequest 携带图片 URL** | 仿现有 `document.py` 上传模式；「DB 存 URL」天然成立；SSE 流式对话接口保持 JSON 不变；解耦可复用。 |
 | ⑥ | 本地存储目录位置 | **D 盘绝对路径**（默认 `D:/acgagent-ai/uploads`） | 脱离项目目录，避免大文件污染 git 树；可用 `.env` 覆盖。 |
 
@@ -63,6 +63,9 @@ storage_base_url: str = "http://localhost:8100/uploads"   # 对应 ACG_AI_STORAG
 > 说明：`storage_root_dir` 是物理落盘位置；`storage_base_url` 是对外/DB 引用的 URL 前缀。二者逻辑对应，
 > 但因①选 base64 内联，模型并不真的通过 HTTP 拉图——`base_url` 仅作为「DB 存的 URL」与前端引用。
 > `image_service.save_upload` 自行 `mkdir` 确保目录存在，不依赖 `main.py` lifespan。
+>
+> **两者均为示例默认值，完全可由 `.env` 覆盖**（`ACG_AI_STORAGE_ROOT_DIR` / `ACG_AI_STORAGE_BASE_URL`），
+> 并写入 `.env.example` 作为可配置项公示，不锁死。生产环境按实际部署改 `.env` 即可。
 
 ### 3.3 `app/services/chat_service.py`：透传 images 到 `_build_messages`
 
@@ -104,6 +107,17 @@ storage_base_url: str = "http://localhost:8100/uploads"   # 对应 ACG_AI_STORAG
 （如 `qwen-vl-max` / `doubao-1.5-vision-pro` / `glm-4v`），并填对应 provider 的 OpenAI 兼容 `base_url`。
 本特性只负责把标准 OpenAI 多模态 content 透传——`ChatOpenAI` 原生支持，无需新 SDK。
 支持多张图（`images` 为 list，生成多个 `image_url` 内容块）。
+
+### 5.1 图生文是「可选能力」，不假设模型支持（用户反馈）
+
+配置的模型**不一定**支持图生文，因此本特性把图片输入做成**完全可选**，系统层面不假设、不保证每个模型都能看图：
+
+- `ChatRequest.images` 默认为空；为空时 `build_message_content` 返回纯字符串，对话行为与现状逐字一致（**零回归**）。
+- **能否真完成图生文，取决于用户创建 Agent 时在 `llm_config.model` 配置的模型本身是否具备视觉能力**——这是用户的责任。
+- 若给纯文本模型发了图，由 provider 报错透出（见 §6），系统不做跨厂商的「是否支持图片」探测。
+- 产品/前端层面应把「图生文」呈现为依赖模型的可选能力，而非所有 Agent 的标配。
+
+与决策④一致：不加 vision capability 标志，纯透传。
 
 ## 6. 错误处理（Fail Loud，Rule 12）
 
