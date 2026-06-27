@@ -27,7 +27,7 @@ async def generate(
 
 @router.post("/prompts/moderate")
 async def moderate(body: ModerateRequest) -> Result:
-    """独立合规校验，始终返回裁决（code=200，读 data.passed）。"""
+    """独立合规校验，正常返回裁决（code=200，读 data.passed）；LLM 失败时 code=500。"""
     return await prompt_service.moderate(body)
 
 

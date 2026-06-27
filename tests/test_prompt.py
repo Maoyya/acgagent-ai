@@ -410,3 +410,45 @@ async def test_generate_invalid_mode_returns_422(client, auth_headers):
         headers=auth_headers,
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_generate_llm_failure_returns_500_envelope():
+    """builder 的 LLM 调用抛异常时，应返回受控 Result(code=500) 信封，而非裸异常穿透（spec §8 一致性）。"""
+    from app.services.prompt_service import prompt_service
+    from app.models.prompt import PromptGenerateRequest, PromptMode, ModerationVerdict
+
+    class _RaisingFakeLLM:
+        async def ainvoke(self, messages, **kwargs):
+            raise RuntimeError("structured output parse failed")
+
+    prompt_service._build_gen_llm = lambda: _RaisingFakeLLM()
+    prompt_service._build_mod_llm = lambda: FakeLLM(
+        structured=ModerationVerdict(passed=True, mode=PromptMode.acg)
+    )
+    result = await prompt_service.generate(
+        PromptGenerateRequest(user_hints=["x"], mode=PromptMode.acg), user_id="u_err"
+    )
+    assert result.code == 500
+    assert result.data is None
+
+
+@pytest.mark.asyncio
+async def test_moderate_llm_failure_returns_500_envelope():
+    """moderator 的 LLM 调用抛异常时，独立校验也应返回受控 Result(code=500)。"""
+    from app.services.prompt_service import prompt_service
+    from app.models.prompt import ModerateRequest, PromptMode
+
+    class _RaisingFakeLLM:
+        def with_structured_output(self, schema, **kwargs):
+            class _Runner:
+                async def ainvoke(self, messages, **kwargs):
+                    raise RuntimeError("parse failed")
+            return _Runner()
+
+    prompt_service._build_mod_llm = lambda: _RaisingFakeLLM()
+    result = await prompt_service.moderate(
+        ModerateRequest(system_prompt="x", mode=PromptMode.acg)
+    )
+    assert result.code == 500
+    assert result.data is None

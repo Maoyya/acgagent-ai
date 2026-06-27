@@ -85,12 +85,17 @@ class PromptService:
         except MetaLLMNotConfigured as e:
             return Result.error(code=500, message=str(e))
 
-        candidate = await self.builder.build(
-            gen_llm, req.user_hints, req.mode, req.target_capabilities
-        )
-        verdict = await self.moderator.moderate(
-            mod_llm, candidate, req.mode, req.target_capabilities
-        )
+        try:
+            candidate = await self.builder.build(
+                gen_llm, req.user_hints, req.mode, req.target_capabilities
+            )
+            verdict = await self.moderator.moderate(
+                mod_llm, candidate, req.mode, req.target_capabilities
+            )
+        except Exception:
+            # LLM 调用/结构化解析失败：受控 500 信封，不抛裸异常（spec §8 Fail Loud）
+            logger.exception("prompt generation failed")
+            return Result.error(code=500, message="generation failed")
         if not verdict.passed:
             return Result(code=403, message="blocked", data=verdict)
 
@@ -108,14 +113,19 @@ class PromptService:
         ))
 
     async def moderate(self, req: ModerateRequest) -> Result:
-        """独立校验：始终返回裁决（code=200，由调用方读 passed 字段）。"""
+        """独立校验：正常返回裁决（code=200，读 passed）；LLM 调用失败时 code=500。"""
         try:
             mod_llm = self._get_mod_llm()
         except MetaLLMNotConfigured as e:
             return Result.error(code=500, message=str(e))
-        verdict = await self.moderator.moderate(
-            mod_llm, req.system_prompt, req.mode, req.target_capabilities
-        )
+        try:
+            verdict = await self.moderator.moderate(
+                mod_llm, req.system_prompt, req.mode, req.target_capabilities
+            )
+        except Exception:
+            # 结构化解析失败：受控 500 信封，不抛裸异常（spec §8 Fail Loud）
+            logger.exception("prompt moderation failed")
+            return Result.error(code=500, message="moderation failed")
         return Result.success(data=verdict)
 
     def estimate(self, system_prompt: str, user_hints: list[str]) -> Result:
