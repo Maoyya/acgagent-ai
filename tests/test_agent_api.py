@@ -42,7 +42,7 @@ async def test_list_agents_empty(client, auth_headers):
 async def test_agent_crud_lifecycle(client, auth_headers):
     """完整 CRUD 生命周期：创建→查询→更新→删除→确认404。"""
     # Create
-    resp = await client.post("/api/v1/agents", json=SAMPLE_AGENT, headers=auth_headers)
+    resp = await client.post("/api/v1/agents?validate=false", json=SAMPLE_AGENT, headers=auth_headers)
     assert resp.json()["code"] == 200
     agent_id = resp.json()["data"]["id"]
 
@@ -53,7 +53,7 @@ async def test_agent_crud_lifecycle(client, auth_headers):
 
     # Update
     resp = await client.put(
-        f"/api/v1/agents/{agent_id}",
+        f"/api/v1/agents/{agent_id}?validate=false",
         json={"name": "Updated Agent"},
         headers=auth_headers,
     )

@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+from app.core.llm import ping_llm
 from app.db.agent_store import agent_store
 from app.db.knowledge_store import knowledge_store
 from app.db.tool_store import tool_store
@@ -40,8 +41,21 @@ class AgentService:
                 f"引用资源不存在: knowledge_base_ids={missing_kb}, tool_ids={missing_tool}"
             )
 
-    def create(self, req: AgentCreateRequest) -> AgentConfig:
-        """创建 Agent。自动生成 12 位 hex ID，默认启用（status=1）。"""
+    def _validate(self, llm_config, kb_ids, tool_ids, validate: bool) -> None:
+        """完整可用性校验（创建/更新共用）。任一失败 raise ValueError。
+
+        引用校验始终执行（本地、零成本）；LLM ping 受 validate 开关豁免。
+        """
+        self._validate_references(kb_ids, tool_ids)
+        if validate:
+            ping_llm(llm_config)
+
+    def create(self, req: AgentCreateRequest, validate: bool = True) -> AgentConfig:
+        """创建 Agent。自动生成 12 位 hex ID，默认启用（status=1）。
+
+        创建前做完整可用性校验；失败抛 ValueError（由路由转 400），不落库。
+        """
+        self._validate(req.llm_config, req.knowledge_base_ids, req.tool_ids, validate)
         agent = AgentConfig(
             id=uuid.uuid4().hex[:12],
             name=req.name,
@@ -58,8 +72,12 @@ class AgentService:
         )
         return agent_store.save(agent)
 
-    def update(self, agent_id: str, req: AgentUpdateRequest) -> Optional[AgentConfig]:
-        """部分更新 Agent。只修改请求中显式传入的字段（exclude_unset=True）。"""
+    def update(self, agent_id: str, req: AgentUpdateRequest, validate: bool = True) -> Optional[AgentConfig]:
+        """部分更新 Agent。只修改请求中显式传入的字段（exclude_unset=True）。
+
+        合并后做完整复检（与创建一致）：即使只改 name 也重新 ping + 校验引用。
+        校验失败抛 ValueError（路由转 400），不 save，旧 Agent 原子不变。
+        """
         agent = agent_store.get(agent_id)
         if agent is None:
             return None
@@ -68,6 +86,8 @@ class AgentService:
         for field, value in update_data.items():
             setattr(agent, field, value)
         agent.updated_at = datetime.now()
+
+        self._validate(agent.llm_config, agent.knowledge_base_ids, agent.tool_ids, validate)
         return agent_store.save(agent)
 
     def delete(self, agent_id: str) -> bool:

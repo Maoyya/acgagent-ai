@@ -25,14 +25,20 @@ async def get_agent(agent_id: str):
 
 
 @router.post("/agents")
-async def create_agent(body: AgentCreateRequest):
-    agent = agent_service.create(body)
+async def create_agent(body: AgentCreateRequest, validate: bool = True):
+    try:
+        agent = agent_service.create(body, validate=validate)
+    except ValueError as e:
+        return Result.error(code=400, message=str(e))
     return Result.success(data=agent)
 
 
 @router.put("/agents/{agent_id}")
-async def update_agent(agent_id: str, body: AgentUpdateRequest):
-    agent = agent_service.update(agent_id, body)
+async def update_agent(agent_id: str, body: AgentUpdateRequest, validate: bool = True):
+    try:
+        agent = agent_service.update(agent_id, body, validate=validate)
+    except ValueError as e:
+        return Result.error(code=400, message=str(e))
     if agent is None:
         return Result.error(code=404, message=f"Agent not found: {agent_id}")
     return Result.success(data=agent)

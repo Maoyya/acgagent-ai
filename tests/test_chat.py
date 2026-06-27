@@ -51,7 +51,7 @@ async def test_chat_stream_agent_not_found(client, auth_headers):
 async def test_chat_disabled_agent(client, auth_headers):
     """对话已禁用的 Agent（status=0）返回 400。"""
     # 创建 Agent
-    resp = await client.post("/api/v1/agents", json={
+    resp = await client.post("/api/v1/agents?validate=false", json={
         "name": "Disabled Agent",
         "llm_config": {
             "provider": "deepseek",
@@ -65,7 +65,7 @@ async def test_chat_disabled_agent(client, auth_headers):
 
     # 禁用 Agent
     await client.put(
-        f"/api/v1/agents/{agent_id}",
+        f"/api/v1/agents/{agent_id}?validate=false",
         json={"status": 0},
         headers=auth_headers,
     )
@@ -90,7 +90,7 @@ async def test_chat_missing_llm_key_returns_500_envelope(client, auth_headers, m
     from app.config import settings
     monkeypatch.setattr(settings, "llm_key_deepseek", "")  # 确保无可解析 key
 
-    resp = await client.post("/api/v1/agents", json={
+    resp = await client.post("/api/v1/agents?validate=false", json={
         "name": "No-Key Agent",
         "llm_config": {
             "provider": "deepseek",
