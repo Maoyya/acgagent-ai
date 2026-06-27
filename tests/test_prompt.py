@@ -101,3 +101,95 @@ def test_preference_anonymous_user_id():
     preference_store.record(None, PromptMode.acg, ["x"], "匿名偏好")
     recs = preference_store.list_by_user("anonymous")
     assert any(r["prompt"] == "匿名偏好" for r in recs)
+
+
+class _FakeAIMessage:
+    """模拟 LangChain AIMessage，仅暴露 .content。"""
+    def __init__(self, content):
+        self.content = content
+
+
+class FakeLLM:
+    """测试用 ChatOpenAI 替身。
+
+    - ainvoke：返回 content（供 PromptBuilder）
+    - with_structured_output：返回带 ainvoke 的 runner，返回预设的结构化对象（供 Moderator）
+    - last_messages：记录最近一次入参，供断言'注入的规则是否符合 mode'
+    """
+    def __init__(self, *, content="", structured=None):
+        self._content = content
+        self._structured = structured
+        self.last_messages = None
+
+    async def ainvoke(self, messages, **kwargs):
+        self.last_messages = messages
+        return _FakeAIMessage(self._content)
+
+    def with_structured_output(self, schema, **kwargs):
+        llm = self
+
+        class _Runner:
+            async def ainvoke(self, messages, **kwargs):
+                llm.last_messages = messages
+                assert llm._structured is not None, (
+                    "FakeLLM 经 with_structured_output 调用但未设置 structured="
+                )
+                return llm._structured
+
+        return _Runner()
+
+
+def _joined(messages):
+    return "\n".join(getattr(m, "content", "") for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_moderator_returns_structured_verdict():
+    """Moderator 应调用 with_structured_output 并原样返回 LLM 给的裁决。"""
+    from app.core.moderator import Moderator
+    from app.models.prompt import ModerationVerdict, PromptMode
+
+    verdict = ModerationVerdict(passed=True, mode=PromptMode.acg)
+    fake = FakeLLM(structured=verdict)
+    result = await Moderator().moderate(fake, "你是一名助手", PromptMode.acg, [])
+    assert result is verdict
+
+
+@pytest.mark.asyncio
+async def test_moderator_anime_blocked_only_in_compliant():
+    """二次元禁令只在 compliant 模式注入——验证 mode 参数化真的改变规则集。"""
+    from app.core.moderator import Moderator
+    from app.models.prompt import ModerationVerdict, PromptMode
+
+    acg_fake = FakeLLM(structured=ModerationVerdict(passed=True, mode=PromptMode.acg))
+    comp_fake = FakeLLM(structured=ModerationVerdict(passed=True, mode=PromptMode.compliant))
+    await Moderator().moderate(acg_fake, "动漫风格助手", PromptMode.acg, [])
+    await Moderator().moderate(comp_fake, "动漫风格助手", PromptMode.compliant, [])
+
+    assert "二次元" not in _joined(acg_fake.last_messages), "acg 模式不应禁止二次元"
+    assert "二次元" in _joined(comp_fake.last_messages), "compliant 模式应禁止二次元"
+
+
+@pytest.mark.asyncio
+async def test_moderator_violence_rule_in_both_modes():
+    """暴力违法是底线规则，两个 mode 都要注入——验证底线与 mode 无关。"""
+    from app.core.moderator import Moderator
+    from app.models.prompt import ModerationVerdict, PromptMode
+
+    for mode in (PromptMode.acg, PromptMode.compliant):
+        fake = FakeLLM(structured=ModerationVerdict(passed=True, mode=mode))
+        await Moderator().moderate(fake, "含暴力内容", mode, [])
+        assert "暴力" in _joined(fake.last_messages), f"{mode} 模式应含暴力禁令"
+
+
+@pytest.mark.asyncio
+async def test_moderator_capability_rule_injected_when_caps_given():
+    """提供 target_capabilities 时，应注入'不超能力'规则并列出能力边界。"""
+    from app.core.moderator import Moderator
+    from app.models.prompt import ModerationVerdict, PromptMode
+
+    fake = FakeLLM(structured=ModerationVerdict(passed=True, mode=PromptMode.acg))
+    await Moderator().moderate(fake, "你什么都能做", PromptMode.acg, ["chat", "rag"])
+    joined = _joined(fake.last_messages)
+    assert "chat" in joined and "rag" in joined, "应列出能力边界"
+    assert "能力" in joined, "应注入不超能力约束"
