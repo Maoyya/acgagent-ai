@@ -1,6 +1,6 @@
 # acgagent-ai 业务流程文档
 
-> 版本：1.1.0 | 更新日期：2026-06-21
+> 版本：2.0.0 | 更新日期：2026-06-27
 
 ---
 
@@ -16,8 +16,9 @@
 | ----------- | --------------------------------------------- |
 | 调用方      | 前端应用或第三方系统，通过 REST API 调用服务  |
 | 系统        | acgagent-ai 后端服务                          |
-| LLM 服务    | 外部大模型 API（豆包/通义/DeepSeek 等 OpenAI 兼容接口） |
-| ChromaDB    | 本地向量数据库，存储知识库 chunks 和对话记忆  |
+| LLM 服务    | 对话 LLM：按 Agent 的 llm_config 接入（豆包/通义/DeepSeek 等 OpenAI 兼容接口） |
+| meta-LLM    | 服务级基础设施 LLM（默认 DeepSeek），用于系统提示词生成 `generate` 与合规校验 `moderate`；由 `ACG_AI_META_LLM_*` 配置，不绑定具体 Agent |
+| ChromaDB    | 本地向量数据库，存储知识库 chunks、对话记忆、用户偏好 |
 
 ---
 
@@ -328,6 +329,69 @@ GET /api/v1/health（无需 API Key）
 
 ---
 
+### 3.6 系统提示词生成流程（prompt 模块）
+
+按用户零散要求（`user_hints`）+ 模式（`PromptMode`）自动生成可用的系统提示词，由 `PromptService` 编排，走**服务级 meta-LLM**（由 `ACG_AI_META_LLM_*` 配置，不绑定具体 Agent）。
+
+#### 3.6.1 生成 generate（主流程）
+
+```
+调用方                   PromptService                    meta-LLM / ChromaDB
+  │                          │                                │
+  │  POST /api/v1/prompts    │                                │
+  │  /generate               │                                │
+  │  {user_hints, mode,      │                                │
+  │   target_capabilities?}  │                                │
+  │ ───────────────────────> │                                │
+  │                          │                                │
+  │                          │ 0. 校验 meta-LLM 已配置         │
+  │                          │    (缺 API_KEY → code=500)      │
+  │                          │                                │
+  │                          │ 1. PromptBuilder.build          │
+  │                          │    (gen_llm temp=0.7, 非流式)   │
+  │                          │ ─────────────────────────────>  │
+  │                          │    ← candidate 系统提示词       │
+  │                          │                                │
+  │                          │ 2. Moderator.moderate           │
+  │                          │    (mod_llm temp=0.0, 单裁判)   │
+  │                          │ ─────────────────────────────>  │
+  │                          │    ← ModerationVerdict          │
+  │                          │                                │
+  │                          │ [LLM 调用/解析失败 → code=500]  │
+  │                          │ [passed=false → code=403        │
+  │                          │   message=blocked, data=裁决]   │
+  │                          │                                │
+  │                          │ 3. CostEstimator.estimate       │
+  │                          │    (tiktoken, 纯计算)           │
+  │                          │                                │
+  │                          │ 4. PreferenceStore.record       │
+  │                          │    (best-effort, 失败仅 warning)│
+  │                          │ ─────────────────────────────>  │
+  │                          │    写入 user_preferences        │
+  │                          │                                │
+  │  {code:200, data:{       │                                │
+  │   system_prompt, mode,   │                                │
+  │   moderation, estimate}} │                                │
+  │ <──────────────────────  │                                │
+```
+
+**双模式（PromptMode）决定校验规则集：**
+
+| 模式 | 风格定位 | 校验侧重 |
+| --- | --- | --- |
+| `acg` | 拥抱二次元/动漫风格 | 仅挡暴力违法/超能力 |
+| `compliant` | 中性专业 | 额外限制二次元风格 |
+
+#### 3.6.2 独立校验 moderate
+
+Java 校验用户已保存的模板时单独调用，不走生成：正常返回裁决（code=200，读 `data.passed`）；meta-LLM 未配置或 LLM 调用/解析失败 → code=500。
+
+#### 3.6.3 独立估算 estimate
+
+纯本地计算（tiktoken），不调用 LLM、不写偏好；返回 `CostEstimate`（`est_completion_tokens` 一期恒 0，对话输出不可预知）。
+
+---
+
 ## 4. 异常处理策略
 
 | 场景                  | 处理方式                                         |
@@ -341,6 +405,9 @@ GET /api/v1/health（无需 API Key）
 | RAG 检索失败          | 降级为空上下文，继续生成                          |
 | ChromaDB 连接失败     | 健康检查返回 "not_initialized"                    |
 | 不支持的文件类型      | 文档处理失败，记录错误信息                        |
+| 提示词校验不通过      | `generate` 返回 `code=403`（message=blocked，data=裁决） |
+| meta-LLM 未配置/调用失败 | `generate` / `moderate` 返回 `code=500`（受控信封，不抛裸异常） |
+| 偏好写入失败          | 仅记 warning，不阻断生成主流程（best-effort）     |
 
 ---
 
@@ -402,3 +469,5 @@ GET /api/v1/health（无需 API Key）
 | RAG top_k      | 硬编码             | 5                               | 每次检索返回条数   |
 | LLM 温度       | Agent.llm_config   | 0.7                             | 生成随机性         |
 | LLM max_tokens | Agent.llm_config   | 4096                            | 单次最大输出 token |
+| meta-LLM 模型  | ACG_AI_META_LLM_MODEL | deepseek-chat                | 提示词生成/校验用，默认 DeepSeek |
+| 对话 LLM 密钥  | ACG_AI_LLM_KEY_<PROVIDER> | （空）                  | 按 provider 分键；agent 自带 api_key 优先 |
