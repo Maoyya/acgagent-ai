@@ -23,6 +23,7 @@ class BaseAgentTool(ABC):
         """将此工具转换为 LangChain @tool 装饰器格式的函数，供 LLM 调用。"""
         @lc_tool(self.name)
         def _tool_func(**kwargs) -> str:
+            """执行工具。"""
             return self.execute(**kwargs)
         _tool_func.description = self.description
         return _tool_func

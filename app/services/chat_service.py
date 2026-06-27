@@ -145,21 +145,23 @@ class ChatService:
     def _get_tools(self, agent_config: AgentConfig) -> list:
         """根据 Agent 的 tool_ids 实例化对应工具并转换为 LangChain Tool 格式。
 
-        knowledge_search 工具需要关联知识库才能工作，未关联知识库时跳过。
+        内置工具按 BUILTIN_TOOLS 映射实例化（id→类单一真相源，去重 Rule 7）；
+        自定义工具 ID 不在此处理 —— chat_service 当前不消费 tool_store，
+        仅由 agent 可用性校验保证其存在性。
+        knowledge_search 需关联知识库，未关联时跳过。
         """
-        from app.tools.calculator import CalculatorTool
-        from app.tools.web_search import WebSearchTool
-        from app.tools.knowledge_search import KnowledgeSearchTool
+        from app.tools import BUILTIN_TOOLS
 
         tools = []
         for tid in agent_config.tool_ids:
-            if tid == "calculator":
-                tools.append(CalculatorTool())
-            elif tid == "web_search":
-                tools.append(WebSearchTool())
-            elif tid == "knowledge_search":
+            cls = BUILTIN_TOOLS.get(tid)
+            if cls is None:
+                continue
+            if tid == "knowledge_search":
                 if agent_config.knowledge_base_ids:
-                    tools.append(KnowledgeSearchTool(agent_config.knowledge_base_ids))
+                    tools.append(cls(agent_config.knowledge_base_ids))
+            else:
+                tools.append(cls())
         return [t.to_langchain_tool() for t in tools]
 
     def _has_tools(self, agent_config: AgentConfig) -> bool:
