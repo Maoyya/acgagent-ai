@@ -570,9 +570,6 @@ class Moderator:
             SystemMessage(content=_MOD_SYSTEM),
             HumanMessage(content=payload),
         ])
-        # 兜底：LLM 偶发不回填 mode 时，按本次请求补齐
-        if verdict.mode is None:
-            verdict.mode = mode
         return verdict
 ```
 
@@ -609,7 +606,7 @@ async def test_builder_returns_llm_content():
 
     fake = FakeLLM(content="你是一名专业的客服助手。")
     result = await PromptBuilder().build(fake, ["专业客服"], PromptMode.compliant, [])
-    assert result == "你是一名专业的客服助手."
+    assert result == "你是一名专业的客服助手。"
 
 
 @pytest.mark.asyncio
@@ -624,8 +621,6 @@ async def test_builder_passes_hints_and_mode_to_llm():
     assert "毒舌客服" in joined and "回答简洁" in joined, "应包含用户 hints"
     assert "二次元" in joined, "acg 模式应给出二次元风格指引"
 ```
-
-> Note: `test_builder_returns_llm_content` asserts the builder returns the LLM content verbatim; `PromptBuilder.build` must `.strip()` trailing whitespace, so the test uses `"你是一名专业的客服助手."` (the fake returns `"你是一名专业的客服助手。"` and build strips — adjust the expected string to match: the fake returns content ending in `。`, strip() does not remove `。`, so expected must equal the fake's content exactly). Use the value shown in the fake.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -682,8 +677,6 @@ class PromptBuilder:
         return (resp.content or "").strip()
 ```
 
-> **Test fix-up:** In Step 1's `test_builder_returns_llm_content`, the fake returns `"你是一名专业的客服助手。"` and `build()` returns it stripped (unchanged). Set the assertion to the exact fake content. Correct the expected literal to `"你是一名专业的客服助手。"` (full-width period) so the test passes. (Do not change the production code to satisfy a half-width period.)
-
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `poetry run pytest tests/test_prompt.py -v`
@@ -729,8 +722,11 @@ def _wire_fakes(gen_content="生成的系统提示词", structured_passed=True, 
     from app.models.prompt import ModerationVerdict, PromptMode
 
     resolved_mode = mode or PromptMode.acg
-    prompt_service._build_gen_llm = lambda self: FakeLLM(content=gen_content)
-    prompt_service._build_mod_llm = lambda self: FakeLLM(
+    # 注意：lambda 不能带 self 形参。_build_*_llm 虽是类方法，但这里赋值到【实例属性】，
+    # Python 描述符协议不对实例属性自动绑定 self；服务侧 self._build_*_llm() 是零参调用，
+    # 故这里的可调用对象也必须是零参的（否则会 TypeError）。
+    prompt_service._build_gen_llm = lambda: FakeLLM(content=gen_content)
+    prompt_service._build_mod_llm = lambda: FakeLLM(
         structured=ModerationVerdict(passed=structured_passed, mode=resolved_mode)
     )
 
@@ -814,7 +810,7 @@ async def test_generate_meta_llm_not_configured():
     prompt_service._gen_llm = None
     prompt_service._mod_llm = None
 
-    def raise_unconfigured(self):
+    def raise_unconfigured():  # 零参：同 _wire_fakes，实例属性不绑定 self
         raise MetaLLMNotConfigured("meta llm not configured")
 
     prompt_service._build_gen_llm = raise_unconfigured
@@ -1206,7 +1202,7 @@ Expect `code=200`, a generated `system_prompt`, `moderation.passed=true`, and a 
 | §8 错误处理 (403/422/500/retry-none) | Task 6 + Task 7 (moderation structured-output retry is a phase-2 concern; phase-1 fail path covered by 500) |
 | §9 测试（7 项意图） | Tasks 1–7 (all 7 intents present as named tests) |
 
-**2. Placeholder scan:** No TBD/TODO/"implement later"/"add validation". Every code step shows complete code. The two `> Note:`/`> Test fix-up:` callouts in Task 5 are explicit corrections with concrete values, not placeholders.
+**2. Placeholder scan:** No TBD/TODO/"implement later"/"add validation". Every code step shows complete code.
 
 **3. Type consistency:**
 - `Moderator.moderate(llm, system_prompt, mode, target_capabilities)` — same signature in Task 4 def, Task 6 calls. ✓
