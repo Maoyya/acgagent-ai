@@ -19,7 +19,7 @@
 | 2 | ping 方式 | **方案 A：发一次最小 completion**（`max_tokens=1`、非流式、带超时），真实触达 provider |
 | 3 | 失败处理 | **失败即拒绝**：不创建 / 不更新，返回 `code=400` + 可读原因 |
 | 4 | 触发时机·创建 | 创建时默认校验（`validate=true` 时执行 LLM ping + 引用完整性；ping 可被 #6 豁免，引用不可） |
-| 5 | 触发时机·更新 | **仅对本次实际变更的字段做对应校验**：改 `llm_config` → ping；改 `knowledge_base_ids` → 校验 KB 存在；改 `tool_ids` → 校验 tool 合法。未变更字段不触发，避免无谓费用 / 延迟 |
+| 5 | 触发时机·更新 | **完整复检**（与创建一致）：先合并出更新后的完整配置，再对其做 LLM ping + 引用完整性校验；即使只改 `name` 也会重新 ping / 校验引用。代价是每次更新都有一次 ping，但语义简单一致、最保险 |
 | 6 | 跳过开关 | 路由 query 参数 `validate: bool = True`；`?validate=false` **仅豁免 LLM ping**（昂贵、网络依赖） |
 | 7 | 引用完整性是否随 `validate=false` 豁免 | **不豁免**。引用校验纯本地、零成本、零网络依赖，始终执行 |
 | 8 | ping 超时 | 默认 **15s**（`ping_llm` 默认参数，先不做成配置项 — YAGNI） |
@@ -76,12 +76,12 @@ PUT /api/v1/agents/{id}?validate=true
   └─ update_agent(agent_id, body, validate)
        └─ agent_service.update(agent_id, req, validate)
             ├─ 读旧 agent（不存在 → 返回 None → 路由 404）
-            ├─ 对"本次变更的字段"分别校验：
-            │     llm_config 变更      → ping（受 validate 开关）
-            │     knowledge_base_ids 变更 → 校验这些 KB 存在
-            │     tool_ids 变更          → 校验这些 tool 合法
-            ├─ (全通过) → setattr 合并 → save → 返回
-            └─ (任一失败) → 抛 ValueError，旧 agent 不变（原子）
+            ├─ setattr 合并出"更新后的完整 agent"（未落盘）
+            ├─ 对完整 agent 做完整校验（与 create 同一函数）：
+            │     _validate_references(完整 kb_ids, 完整 tool_ids)   # 始终
+            │     if validate: ping_llm(完整 llm_config)             # 受开关
+            ├─ (全通过) → save → 返回
+            └─ (任一失败) → 抛 ValueError，旧 agent 不变（原子，未 save）
 ```
 
 ---
@@ -118,18 +118,20 @@ def _validate_references(self, kb_ids: list[str], tool_ids: list[str]) -> None:
 - Tool：`tid not in BUILTIN_TOOL_IDS and tool_store.get(tid) is None` → 收集到缺失列表。
 - 任一缺失 → `ValueError(f"引用资源不存在: knowledge_base_ids={缺失kb}, tool_ids={缺失tool}")`。
 
-### 4.3 更新时的「按变更字段校验」
+### 4.3 统一校验入口（创建 / 更新共用）
 
-`update()` 用 `req.model_dump(exclude_unset=True)` 判断哪些字段被显式传入：
+抽出统一校验函数，创建与更新走同一逻辑：
 
-| 变更字段 | 校验动作 | 受 `validate` 开关？ |
-|---|---|---|
-| `llm_config` | `ping_llm(new_llm_config)` | 是（`validate=false` 跳过） |
-| `knowledge_base_ids` | `_validate_references(new_kb_ids, 当前tool_ids)` | 否（始终） |
-| `tool_ids` | `_validate_references(当前kb_ids, new_tool_ids)` | 否（始终） |
-| 其它（name / system_prompt / …） | 不触发任何校验 | — |
+```python
+def _validate(self, llm_config, kb_ids, tool_ids, validate: bool) -> None:
+    """完整可用性校验。任一失败 raise ValueError。"""
+    self._validate_references(kb_ids, tool_ids)   # 始终执行（本地、零成本）
+    if validate:
+        ping_llm(llm_config)                      # 网络校验，受开关豁免
+```
 
-> 注意：引用校验对「未变更」的另一侧用**当前已存 agent 的值**，避免因部分更新漏判。
+- **创建**：`_validate(req.llm_config, req.knowledge_base_ids, req.tool_ids, validate)`，通过后才构造 `AgentConfig` 并 save。
+- **更新**：先用 `req.model_dump(exclude_unset=True)` 把变更 `setattr` 到旧 agent 上得到**完整配置**（未落盘），再 `_validate(完整.llm_config, 完整.knowledge_base_ids, 完整.tool_ids, validate)`，通过后才 save。校验失败则不 save，旧 agent 原子不变。
 
 ---
 
@@ -190,8 +192,9 @@ mock `ChatOpenAI.invoke`（复用 `tests/conftest.py` 现有 mock 机制），�
 | `test_create_rejected_when_llm_unreachable` | 连接错误 / 超时 → 400 未落库 | 能抓到 base_url 不通 |
 | `test_ratelimit_treated_as_available` | `RateLimitError` → 视为通过、正常创建 | 限流不代表配置错 |
 | `test_create_skips_ping_when_validate_false` | `validate=false` → 不调 invoke，即使配置无效也创建 | 排查 / 抖动逃生口 |
-| `test_update_pings_only_when_llm_config_changed` | 更新改 `llm_config`→invoke 被调用；只改 `name`→invoke **未**被调用 | 避免无谓费用 |
-| `test_update_rejected_when_ping_fails_keeps_old` | 更新改 `llm_config` 且 ping 失败 → 400 且 agent 配置仍为旧值 | 更新原子性，不半改 |
+| `test_update_full_revalidate_even_when_only_name_changed` | 只改 `name` 也触发 ping + 引用校验（invoke 被调用） | 更新=完整复检，与创建一致 |
+| `test_update_rejected_when_ping_fails_keeps_old` | 更新且 ping 失败 → 400 且 agent 配置仍为旧值（未 save） | 更新原子性，不半改 |
+| `test_update_rejected_when_kb_not_found_keeps_old` | 更新引入不存在的 kb_id → 400 且旧 agent 不变 | 更新引用校验 + 原子性 |
 | `test_create_rejected_when_kb_not_found` | `knowledge_base_ids` 含不存在 id → 400 未落库 | 引用完整性 |
 | `test_create_rejected_when_custom_tool_not_found` | `tool_ids` 含不存在的自定义 id → 400 | 引用完整性 |
 | `test_create_accepts_builtin_tool_id` | `tool_ids=['calculator']` → 通过、不误判 | 内置工具合法 |
