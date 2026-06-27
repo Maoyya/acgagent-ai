@@ -123,3 +123,81 @@ async def test_chat_missing_llm_key_returns_500_envelope(client, auth_headers, m
     # 预检若被移除，stream 分支会返回 StreamingResponse（恒 200），失败要到 SSE 中途才暴露——
     # 此断言把"在分流前拦下"这一意图锁定下来（Rule 9：业务逻辑变了测试要能失败）。
     assert resp.headers["content-type"].startswith("application/json")
+
+
+@pytest.mark.asyncio
+async def test_upload_image_returns_url(client, auth_headers, tmp_path, monkeypatch):
+    """上传图片 → 200，返回 url，文件落到 storage_root_dir。"""
+    from app.services import image_service
+    monkeypatch.setattr(image_service.settings, "storage_root_dir", tmp_path)
+    monkeypatch.setattr(image_service.settings, "storage_base_url", "http://x/up")
+
+    png = b"\x89PNG\r\n\x1a\n"
+    resp = await client.post(
+        "/api/v1/chat/images",
+        files={"file": ("cat.png", png, "image/png")},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 200
+    url = body["data"]["url"]
+    assert url.startswith("http://x/up/")
+    fname = url.rsplit("/", 1)[-1]
+    assert (tmp_path / fname).read_bytes() == png
+
+
+@pytest.mark.asyncio
+async def test_upload_image_rejects_non_image(client, auth_headers, tmp_path, monkeypatch):
+    """非图片 mime → 400。"""
+    from app.services import image_service
+    monkeypatch.setattr(image_service.settings, "storage_root_dir", tmp_path)
+    resp = await client.post(
+        "/api/v1/chat/images",
+        files={"file": ("a.txt", b"hello", "text/plain")},
+        headers=auth_headers,
+    )
+    assert resp.json()["code"] == 400
+
+
+@pytest.mark.asyncio
+async def test_chat_threads_images_to_model(client, auth_headers, tmp_path, monkeypatch):
+    """意图：对话请求带 images 时，模型端收到多模态消息（端到端透传）。conversation_id 留空以规避 ChromaDB。"""
+    from app.services import image_service
+    monkeypatch.setattr(image_service.settings, "storage_root_dir", tmp_path)
+    monkeypatch.setattr(image_service.settings, "storage_base_url", "http://x/up")
+    ref = image_service.save_upload("cat.png", b"\x89PNG", "image/png")
+
+    captured = {}
+
+    class _FakeLLM:
+        async def ainvoke(self, messages):
+            captured["messages"] = messages
+
+            class _R:
+                content = "it's a cat"
+            return _R()
+
+    monkeypatch.setattr("app.services.chat_service.create_chat_model", lambda cfg: _FakeLLM())
+
+    resp = await client.post("/api/v1/agents?validate=false", json={
+        "name": "Vision Agent",
+        "llm_config": {
+            "provider": "qwen",
+            "model": "qwen-vl-max",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "api_key": "sk-test",
+            "temperature": 0.7,
+        },
+    }, headers=auth_headers)
+    agent_id = resp.json()["data"]["id"]
+
+    resp = await client.post(f"/api/v1/chat/{agent_id}/completions", json={
+        "message": "describe",
+        "images": [ref.url],
+        "stream": False,
+    }, headers=auth_headers)
+    assert resp.json()["code"] == 200
+    last = captured["messages"][-1]
+    assert isinstance(last.content, list)
+    assert last.content[1]["type"] == "image_url"

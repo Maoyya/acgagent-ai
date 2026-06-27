@@ -5,16 +5,31 @@
 - stream=true（默认）：返回 SSE 流式响应（text/event-stream）
 - stream=false：返回完整 JSON 响应
 """
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from app.core.llm import resolve_api_key
 from app.models.chat import ChatRequest
 from app.models.common import Result
+from app.services import image_service
 from app.services.chat_service import chat_service
 from app.services.agent_service import agent_service
 
 router = APIRouter(tags=["chat"])
+
+
+@router.post("/chat/images")
+async def upload_image(file: UploadFile = File(...)):
+    """上传图片，存盘后返回 url（供对话请求的 images 字段引用）。
+
+    非 image/* 或超限 → Result.error(400)。鉴权由父路由 /api/v1 的 verify_api_key 提供。
+    """
+    content = await file.read()
+    try:
+        ref = image_service.save_upload(file.filename, content, file.content_type)
+    except ValueError as e:
+        return Result.error(code=400, message=str(e))
+    return Result.success(data=ref)
 
 
 @router.post("/chat/{agent_id}/completions")
@@ -45,6 +60,7 @@ async def chat_completions(
                 message=body.message,
                 conversation_id=body.conversation_id,
                 user_id=x_user_id,
+                images=body.images,
             ),
             media_type="text/event-stream",
             headers={
@@ -59,5 +75,6 @@ async def chat_completions(
             message=body.message,
             conversation_id=body.conversation_id,
             user_id=x_user_id,
+            images=body.images,
         )
         return Result.success(data=result)

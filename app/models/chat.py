@@ -16,6 +16,7 @@ class ChatOptions(BaseModel):
 class ChatRequest(BaseModel):
     conversation_id: str = ""
     message: str
+    images: list[str] = []
     stream: bool = True
     options: Optional[ChatOptions] = None
 
