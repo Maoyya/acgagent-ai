@@ -57,6 +57,37 @@ def test_to_data_urls_missing_file_raises(tmp_path, monkeypatch):
         image_service.to_data_urls(["http://x/up/nope.png"])
 
 
+def test_to_data_urls_rejects_traversal_url(tmp_path, monkeypatch):
+    """反斜杠路径穿越攻击（Windows）必须被 _stored_path_for 拦下。
+
+    为什么重要：basename 旧实现 url.rsplit('/',1)[-1] 不处理反斜杠，攻击者用
+    `http://x/..\\..\\secret` 可越出 storage_root_dir 读任意文件并内联给视觉模型。
+    断言 ValueError 且绝不读取目录外文件（Fail Loud）。
+    """
+    monkeypatch.setattr(image_service.settings, "storage_root_dir", tmp_path)
+    # 在 tmp_path 内放一个真文件，确保即便解析穿越也能区分"读到了"vs"被拦下"
+    (tmp_path / "legit.png").write_bytes(PNG)
+    traversal_url = r"http://x/..\..\secret"
+    with pytest.raises(ValueError):
+        image_service.to_data_urls([traversal_url])
+
+
+def test_to_data_urls_strips_query_string(tmp_path, monkeypatch):
+    """url 带 query string 时应剥离，按基础名读盘并返回有效 data URL。
+
+    为什么重要：客户端引用常带 ?w=100 等缩略参数，旧实现把 query 当文件名一部分，
+    导致 FileNotFoundError。_stored_path_for 经 urlparse 仅取 path 段，正确读盘。
+    """
+    monkeypatch.setattr(image_service.settings, "storage_root_dir", tmp_path)
+    monkeypatch.setattr(image_service.settings, "storage_base_url", "http://x/up")
+    ref = image_service.save_upload("cat.png", PNG, "image/png")
+
+    [du] = image_service.to_data_urls([ref.url + "?w=100"])
+
+    assert du.startswith("data:image/png;base64,")
+    assert base64.b64decode(du.split("base64,", 1)[1]) == PNG
+
+
 def test_build_message_content_no_images_returns_plain_string():
     assert image_service.build_message_content("hi", None) == "hi"
     assert image_service.build_message_content("hi", []) == "hi"

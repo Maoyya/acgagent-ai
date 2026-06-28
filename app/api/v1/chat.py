@@ -22,13 +22,26 @@ router = APIRouter(tags=["chat"])
 async def upload_image(file: UploadFile = File(...)):
     """上传图片，存盘后返回 url（供对话请求的 images 字段引用）。
 
-    非 image/* 或超限 → Result.error(400)。鉴权由父路由 /api/v1 的 verify_api_key 提供。
+    分块读取并在累计超限时提前拒绝（避免超大请求先撑爆内存）。
+    非 image/* / 超限 → 400；落盘失败（盘满/权限 OSError）→ 500。鉴权由父路由 /api/v1 的 verify_api_key 提供。
     """
-    content = await file.read()
+    chunks = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > image_service.MAX_IMAGE_BYTES:
+            return Result.error(code=400, message=f"image too large: > {image_service.MAX_IMAGE_BYTES} bytes")
+        chunks.append(chunk)
+    content = b"".join(chunks)
     try:
         ref = image_service.save_upload(file.filename, content, file.content_type)
     except ValueError as e:
         return Result.error(code=400, message=str(e))
+    except OSError as e:
+        return Result.error(code=500, message=f"image storage failed: {e}")
     return Result.success(data=ref)
 
 
@@ -70,11 +83,14 @@ async def chat_completions(
             },
         )
     else:
-        result = await chat_service.sync_chat(
-            agent_config=agent_config,
-            message=body.message,
-            conversation_id=body.conversation_id,
-            user_id=x_user_id,
-            images=body.images,
-        )
+        try:
+            result = await chat_service.sync_chat(
+                agent_config=agent_config,
+                message=body.message,
+                conversation_id=body.conversation_id,
+                user_id=x_user_id,
+                images=body.images,
+            )
+        except Exception as e:
+            return Result.error(code=500, message=str(e))
         return Result.success(data=result)

@@ -161,6 +161,97 @@ async def test_upload_image_rejects_non_image(client, auth_headers, tmp_path, mo
 
 
 @pytest.mark.asyncio
+async def test_upload_rejects_oversize_via_streaming(client, auth_headers, monkeypatch):
+    """分块读取累计超限时提前 400，而不是先把整个超大请求读进内存。
+
+    为什么重要：旧实现 `await file.read()` 先把整文件缓冲进内存再做大小校验，
+    攻击者上传超大请求即可 DoS 内存。分块 + running cap 让内存占用有界。
+    """
+    from app.services import image_service
+    monkeypatch.setattr(image_service, "MAX_IMAGE_BYTES", 10)
+
+    big = b"\x89PNG" + b"x" * 200  # 200 字节，远超 monkeypatch 后的 10 上限
+    resp = await client.post(
+        "/api/v1/chat/images",
+        files={"file": ("cat.png", big, "image/png")},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["code"] == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_returns_500_on_storage_error(client, auth_headers, tmp_path, monkeypatch):
+    """落盘 OSError（盘满/权限）转成受控 500 信封，而非裸 500 堆栈。
+
+    为什么重要：save_upload 的 write_bytes 可能抛 OSError，旧实现未捕获会让
+    FastAPI 返回无信封 500。捕获后包成 Result.error(500) 与其他错误路径一致。
+    """
+    from app.services import image_service
+
+    def _boom(filename, content, content_type):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(image_service, "save_upload", _boom)
+
+    resp = await client.post(
+        "/api/v1/chat/images",
+        files={"file": ("cat.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 500
+    assert "message" in body  # Result 信封，而非裸 500
+
+
+@pytest.mark.asyncio
+async def test_chat_sync_missing_image_returns_500_envelope(client, auth_headers, monkeypatch):
+    """同步对话 images 引用不存在的图片 → 受控 Result.error(500) 信封，而非裸 500。
+
+    为什么重要：Fix A 后 to_data_urls 对缺失文件抛 FileNotFoundError；若 _build_messages
+    在 try 外执行 + sync_chat 未包信封，错误会裸奔成无信封 500。本测试锁定该意图。
+    """
+    from app.services import image_service
+
+    captured = {}
+
+    class _FakeLLM:
+        async def ainvoke(self, messages):
+            captured["called"] = True  # 不应被调用（先在 _build_messages 失败）
+
+            class _R:
+                content = "x"
+            return _R()
+
+    monkeypatch.setattr("app.services.chat_service.create_chat_model", lambda cfg: _FakeLLM())
+
+    resp = await client.post("/api/v1/agents?validate=false", json={
+        "name": "Sync Img Agent",
+        "llm_config": {
+            "provider": "qwen",
+            "model": "qwen-vl-max",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "api_key": "sk-test",
+            "temperature": 0.7,
+        },
+    }, headers=auth_headers)
+    agent_id = resp.json()["data"]["id"]
+
+    resp = await client.post(f"/api/v1/chat/{agent_id}/completions", json={
+        "message": "describe",
+        "images": ["http://x/does-not-exist.png"],
+        "stream": False,
+    }, headers=auth_headers)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 500
+    assert "message" in body  # 必须是 Result 信封
+    assert not captured.get("called")  # LLM 不应被调用（_build_messages 先失败）
+
+
+@pytest.mark.asyncio
 async def test_chat_threads_images_to_model(client, auth_headers, tmp_path, monkeypatch):
     """意图：对话请求带 images 时，模型端收到多模态消息（端到端透传）。conversation_id 留空以规避 ChromaDB。"""
     from app.services import image_service

@@ -59,9 +59,9 @@ class ChatService:
 
     async def _stream_plain(self, llm, agent_config, message, memory, conversation_id, images=None):
         """纯聊天模式：直接流式调用 LLM，无工具绑定。"""
-        messages = self._build_messages(agent_config, memory, message, conversation_id, images)
         full_content = ""
         try:
+            messages = self._build_messages(agent_config, memory, message, conversation_id, images)
             async for chunk in llm.astream(messages):
                 if chunk.content:
                     full_content += chunk.content
@@ -84,10 +84,10 @@ class ChatService:
         """
         tools = self._get_tools(agent_config)
         llm_with_tools = llm.bind_tools(tools)
-        messages = self._build_messages(agent_config, memory, message, conversation_id, images)
         full_content = ""
 
         try:
+            messages = self._build_messages(agent_config, memory, message, conversation_id, images)
             async for chunk in llm_with_tools.astream(messages):
                 if chunk.content:
                     full_content += chunk.content
@@ -136,9 +136,9 @@ class ChatService:
         memory.save_user_message(conversation_id, message)
 
         llm = create_chat_model(agent_config.llm_config)
-        messages = self._build_messages(agent_config, memory, message, conversation_id, images)
 
         try:
+            messages = self._build_messages(agent_config, memory, message, conversation_id, images)
             response = await llm.ainvoke(messages)
             content = response.content or ""
             memory.save_assistant_message(conversation_id, content)

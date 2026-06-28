@@ -12,6 +12,7 @@ mime 由落盘文件名扩展名推断（落盘名保留原扩展名）。
 import base64
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
@@ -62,21 +63,36 @@ def save_upload(filename: str, content: bytes, content_type: str) -> ImageRef:
     return ImageRef(url=f"{settings.storage_base_url.rstrip('/')}/{stored_name}", filename=stored_name)
 
 
+def _stored_path_for(url: str) -> Path:
+    """从 url 安全解析 storage_root_dir 内的落盘文件路径。
+
+    - urlparse 取 path 再取最后一段（去掉 query/fragment）。
+    - basename 含反斜杠或父目录段（..）即视为路径穿越企图 → ValueError（Fail Loud）。
+      不做静默归一化：合法落盘名不会带分隔符或 ..，带即是攻击。
+    - resolve 后必须仍在 storage_root_dir 内，否则 ValueError（兜底防线）。
+    """
+    raw_name = urlparse(url).path.rsplit("/", 1)[-1]
+    if "\\" in raw_name or raw_name in ("..", ".") or "/" in raw_name:
+        raise ValueError(f"image url escapes storage root: {url!r}")
+    root = Path(settings.storage_root_dir).resolve()
+    path = (root / raw_name).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError(f"image url escapes storage root: {url!r}")
+    return path
+
+
 def to_data_urls(urls: list[str]) -> list[str]:
     """把存储 url 列表转成 base64 data URL 列表（发送时内联）。
 
-    basename(url) → 读 storage_root_dir/basename → data:<mime>;base64,<b64>。
-    文件缺失抛 FileNotFoundError（Fail Loud，不静默跳过——spec §6）。
+    通过 _stored_path_for 安全定位文件（防穿越/去 query）；文件缺失抛 FileNotFoundError。
     """
-    root = Path(settings.storage_root_dir)
     out = []
     for url in urls:
-        name = url.rsplit("/", 1)[-1]
-        path = root / name
+        path = _stored_path_for(url)
         if not path.is_file():
             raise FileNotFoundError(f"image file not found for url: {url}")
         b64 = base64.b64encode(path.read_bytes()).decode("ascii")
-        out.append(f"data:{_mime_for(name)};base64,{b64}")
+        out.append(f"data:{_mime_for(path.name)};base64,{b64}")
     return out
 
 
