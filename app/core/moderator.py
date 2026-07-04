@@ -50,9 +50,14 @@ class Moderator:
             + "\n\n若违反任一规则，passed=false 并在 violated_rules/reasons 说明；否则 passed=true。"
         )
 
-        structured = llm.with_structured_output(ModerationVerdict)
+        # 强制 function_calling：把 schema 作为工具定义下发给模型。
+        # 默认 method 在部分兼容端（如阿里云百炼 qwen）会回落到 json_object 响应格式——
+        # 该模式不下发 schema，模型字段名/字段存在性随机漂移（如 passed↔violation），无法稳定解析。
+        structured = llm.with_structured_output(ModerationVerdict, method="function_calling")
         verdict = await structured.ainvoke([
             SystemMessage(content=_MOD_SYSTEM),
             HumanMessage(content=payload),
         ])
+        # mode 以入参为准（不信任 LLM 回显），避免 provider 漏字段导致整条链路失败。
+        verdict.mode = mode
         return verdict
