@@ -4,8 +4,11 @@
 使用 pydantic-settings 从环境变量或 .env 文件加载配置。
 所有环境变量前缀为 ACG_AI_（如 ACG_AI_PORT → port）。
 """
-from pydantic_settings import BaseSettings
+import json
 from pathlib import Path
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -27,6 +30,27 @@ class Settings(BaseSettings):
     meta_llm_model: str = "deepseek-chat"
     meta_llm_base_url: str = "https://api.deepseek.com/v1"
     meta_llm_api_key: str = ""   # 缺失时 generate/moderate 返回 500
+
+    # moderator 专用 extra_body（JSON）：按 provider 关 thinking 等。
+    # deepseek-v4-pro 等 thinking 模型与 function_calling 的 tool_choice=required 冲突，
+    # 需在此关思考（如 {"thinking":{"type":"disabled"}}）。仅 _build_mod_llm 消费。
+    meta_llm_mod_extra_body: dict = Field(default_factory=dict)
+
+    @field_validator("meta_llm_mod_extra_body", mode="before")
+    @classmethod
+    def _parse_mod_extra_body(cls, v):
+        """env 里是 JSON 字符串 → dict；空串→{}；非法 JSON→启动即 ValidationError（Rule 12 fail-loud）。"""
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return {}
+            try:
+                return json.loads(s)
+            except json.JSONDecodeError as e:
+                raise ValueError(
+                    f"ACG_AI_META_LLM_MOD_EXTRA_BODY 不是合法 JSON: {e}"
+                ) from e
+        return v
 
     # 对话 / Agent LLM 密钥（方案 B：按 provider 分键，由 app/core/llm.py 的 resolve_api_key 消费）。
     # 对应环境变量 ACG_AI_LLM_KEY_<PROVIDER 大写>。新增 provider 需在此声明字段（fail-loud）。
