@@ -14,11 +14,14 @@ logger = logging.getLogger("acgagent-ai")
 
 
 class MemoryStore:
+    """对话记忆的 ChromaDB 存储封装。按 conversation_id 隔离 collection，提供消息追加 / 加载 / 清空。"""
+
     def _collection_name(self, conversation_id: str) -> str:
         """每个会话对应一个独立的 ChromaDB collection。"""
         return f"memory_conv_{conversation_id}"
 
     def _get_or_create_collection(self, conversation_id: str):
+        """获取或创建会话对应的 collection（不存在则新建，cosine 距离）。"""
         return get_chroma().get_or_create_collection(
             name=self._collection_name(conversation_id),
             metadata={"hnsw:space": "cosine"},

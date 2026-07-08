@@ -17,7 +17,10 @@ _COLLECTION = "user_preferences"
 
 
 class PreferenceStore:
+    """用户偏好的 ChromaDB 存储封装。把生成的 system_prompt 作为 document 向量化落盘，供二期相似度推荐复用。"""
+
     def _collection(self):
+        """获取或创建全局偏好 collection（单例名 user_preferences，cosine 距离）。"""
         return get_chroma().get_or_create_collection(
             name=_COLLECTION,
             metadata={"hnsw:space": "cosine"},
@@ -40,7 +43,7 @@ class PreferenceStore:
         )
 
     def list_by_user(self, user_id: str) -> list[dict]:
-        """读取某用户全部偏好记录（一期用于校验/排错；二期 recommend 复用）。"""
+        """读取某用户全部偏好记录（查询异常时静默返回空列表；一期用于校验/排错，二期 recommend 复用）。"""
         col = self._collection()
         try:
             res = col.get(where={"user_id": user_id}, include=["documents", "metadatas"])
