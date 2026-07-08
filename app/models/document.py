@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 
 class DocumentVO(BaseModel):
+    """文档实体：归属某知识库，上传后异步走 解析→分块→向量化；status 流转 processing→completed/failed。"""
+
     id: str = Field(default="", description="Auto-generated ID")
     knowledge_base_id: str = Field(description="Parent knowledge base ID")
     file_name: str = Field(description="Original file name")
@@ -17,4 +19,4 @@ class DocumentVO(BaseModel):
     chunk_count: int = Field(default=0, description="Number of chunks after processing")
     status: str = Field(default="processing", description="processing / completed / failed")
     error_message: Optional[str] = Field(default=None, description="Error message if failed")
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=datetime.now, description="上传时间")
