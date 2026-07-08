@@ -53,3 +53,76 @@ def test_store_list_all_and_delete(tmp_path, monkeypatch):
     assert knowledge_entry_store.delete("e1") is True
     assert knowledge_entry_store.get("e1") is None
     assert knowledge_entry_store.delete("nope") is False
+
+
+import pytest
+from app.models.knowledge_entry import (
+    KnowledgeEntryCreateRequest, KnowledgeEntryUpdateRequest,
+    EntryType, EntryScope,
+)
+
+
+def _req(**over):
+    base = dict(type=EntryType.character, scope=EntryScope.public, name="初音",
+                summary="双马尾歌姬", tags=["vocaloid"], details={"personality": "元气"})
+    base.update(over)
+    return KnowledgeEntryCreateRequest(**base)
+
+
+def test_service_create_syncs_vector(tmp_path, monkeypatch, fake_chroma):
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service, _COLLECTION
+    entry = knowledge_entry_service.create(_req(name="A"))
+    docs = fake_chroma.collections[_COLLECTION].docs
+    assert entry.id in docs
+    assert docs[entry.id]["metadata"]["type"] == "character"
+    assert docs[entry.id]["metadata"]["scope"] == "public"
+
+
+def test_service_private_without_user_id_raises(tmp_path, monkeypatch, fake_chroma):
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service
+    with pytest.raises(ValueError):
+        knowledge_entry_service.create(_req(scope=EntryScope.private))
+
+
+def test_service_update_and_delete_sync(tmp_path, monkeypatch, fake_chroma):
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service, _COLLECTION
+    entry = knowledge_entry_service.create(_req(name="A"))
+    updated = knowledge_entry_service.update(entry.id, KnowledgeEntryUpdateRequest(name="B"))
+    assert updated.name == "B"
+    docs = fake_chroma.collections[_COLLECTION].docs
+    assert entry.id in docs
+    # 证明向量内容随 update 刷新（name A→B → embedding 文本含 B），而非仅靠 create 写入兜过
+    assert "B" in docs[entry.id]["document"]
+
+    assert knowledge_entry_service.delete(entry.id) is True
+    assert entry.id not in fake_chroma.collections[_COLLECTION].docs
+    assert knowledge_entry_service.update("nope", KnowledgeEntryUpdateRequest(name="x")) is None
+
+
+def test_service_update_scope_to_private_requires_user_id(tmp_path, monkeypatch, fake_chroma):
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service
+    entry = knowledge_entry_service.create(_req(scope=EntryScope.public))
+    with pytest.raises(ValueError):
+        knowledge_entry_service.update(entry.id, KnowledgeEntryUpdateRequest(scope=EntryScope.private))
+
+
+def test_service_list_filters(tmp_path, monkeypatch, fake_chroma):
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service
+    knowledge_entry_service.create(_req(name="初音", type=EntryType.character))
+    knowledge_entry_service.create(_req(name="赛博朋克", type=EntryType.style))
+    chars = knowledge_entry_service.list(type="character")
+    assert len(chars) == 1 and chars[0].name == "初音"
+    styles = knowledge_entry_service.list(type="style")
+    assert len(styles) == 1 and styles[0].name == "赛博朋克"
+    q = knowledge_entry_service.list(q="赛博")
+    assert len(q) == 1
