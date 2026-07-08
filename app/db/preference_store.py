@@ -50,7 +50,7 @@ class PreferenceStore:
         except Exception:
             return []
         out = []
-        for doc, meta in zip(res["documents"], res["metadatas"]):
+        for doc, meta in zip(res["documents"] or [], res["metadatas"] or []):
             out.append({
                 "prompt": doc,
                 "user_id": meta.get("user_id"),

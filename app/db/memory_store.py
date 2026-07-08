@@ -59,7 +59,7 @@ class MemoryStore:
         )
 
         messages = []
-        for doc, meta in zip(result["documents"], result["metadatas"]):
+        for doc, meta in zip(result["documents"] or [], result["metadatas"] or []):
             messages.append({
                 "role": meta.get("role", "user"),
                 "content": doc,

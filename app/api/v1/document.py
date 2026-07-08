@@ -12,7 +12,9 @@ async def upload_document(
     kb_id: str,
     file: UploadFile = File(...),
 ):
-    """上传文档到指定知识库，异步走 解析→分块→向量化；知识库不存在返回 404。"""
+    """上传文档到指定知识库，异步走 解析→分块→向量化；缺文件名返回 400，知识库不存在返回 404。"""
+    if file.filename is None:
+        return Result.error(code=400, message="上传文件缺少文件名（filename）")
     content = await file.read()
     doc = await document_service.upload_document(kb_id, file.filename, content)
     if doc is None:
