@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     storage_root_dir: Path = Path("D:/acgagent-ai/uploads")
     storage_base_url: str = "http://localhost:8100/uploads"
 
+    # 媒体生成（dashscope 通义万相）：文生图 + 图生视频，异步任务
+    generation_api_key: str = ""   # dashscope key；缺失 → 提交/查询返回 500
+    generation_base_url: str = "https://dashscope.aliyuncs.com/api/v1"
+    generation_image_model: str = "wanx2.1-t2i-turbo"
+    generation_video_model: str = "wan2.1-i2v-turbo"
+
     model_config = {
         "env_prefix": "ACG_AI_",
         "env_file": ".env",
