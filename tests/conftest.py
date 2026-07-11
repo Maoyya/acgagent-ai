@@ -72,5 +72,5 @@ def fake_chroma(monkeypatch):
     """patch 各消费模块已绑定的 get_chroma 名字，返回共享 FakeChroma。"""
     fake = FakeChroma()
     monkeypatch.setattr("app.services.knowledge_entry_service.get_chroma", lambda: fake)
-    # Task 5 在此追加：monkeypatch.setattr("app.tools.knowledge_entry_lookup.get_chroma", lambda: fake)
+    monkeypatch.setattr("app.tools.knowledge_entry_lookup.get_chroma", lambda: fake)
     return fake

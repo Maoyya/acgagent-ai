@@ -10,6 +10,7 @@ from typing import Optional
 
 from app.core.llm import ping_llm
 from app.db.agent_store import agent_store
+from app.db.knowledge_entry_store import knowledge_entry_store
 from app.db.knowledge_store import knowledge_store
 from app.db.tool_store import tool_store
 from app.models.agent import AgentConfig, AgentCreateRequest, AgentUpdateRequest
@@ -25,28 +26,32 @@ class AgentService:
         """按 ID 获取 Agent 配置，不存在返回 None。"""
         return agent_store.get(agent_id)
 
-    def _validate_references(self, kb_ids: list[str], tool_ids: list[str]) -> None:
-        """校验 KB / tool 引用存在。通过 return；缺失 raise ValueError（列出缺失 ID）。
+    def _validate_references(self, kb_ids: list[str], tool_ids: list[str], entry_ids: Optional[list[str]] = None) -> None:
+        """校验 KB / tool / entry 引用存在。通过 return；缺失 raise ValueError（列出缺失 ID）。
 
         - KB：每个 id 必须 knowledge_store.get(id) 存在。
         - Tool：合法 ⟺ 在 BUILTIN_TOOL_IDS 中 或 tool_store.get(id) 存在（内置工具不入库）。
+        - Entry：每个 id 必须 knowledge_entry_store.get(id) 存在。
         """
         missing_kb = [kb for kb in kb_ids if knowledge_store.get(kb) is None]
         missing_tool = [
             tid for tid in tool_ids
             if tid not in BUILTIN_TOOL_IDS and tool_store.get(tid) is None
         ]
-        if missing_kb or missing_tool:
+        entry_ids = entry_ids or []
+        missing_entry = [eid for eid in entry_ids if knowledge_entry_store.get(eid) is None]
+        if missing_kb or missing_tool or missing_entry:
             raise ValueError(
-                f"引用资源不存在: knowledge_base_ids={missing_kb}, tool_ids={missing_tool}"
+                f"引用资源不存在: knowledge_base_ids={missing_kb}, "
+                f"tool_ids={missing_tool}, active_entry_ids={missing_entry}"
             )
 
-    def _validate(self, llm_config, kb_ids, tool_ids, validate: bool) -> None:
+    def _validate(self, llm_config, kb_ids, tool_ids, entry_ids, validate: bool) -> None:
         """完整可用性校验（创建/更新共用）。任一失败 raise ValueError。
 
         引用校验始终执行（本地、零成本）；LLM ping 受 validate 开关豁免。
         """
-        self._validate_references(kb_ids, tool_ids)
+        self._validate_references(kb_ids, tool_ids, entry_ids)
         if validate:
             ping_llm(llm_config)
 
@@ -55,7 +60,7 @@ class AgentService:
 
         创建前做完整可用性校验；失败抛 ValueError（由路由转 400），不落库。
         """
-        self._validate(req.llm_config, req.knowledge_base_ids, req.tool_ids, validate)
+        self._validate(req.llm_config, req.knowledge_base_ids, req.tool_ids, req.active_entry_ids, validate)
         agent = AgentConfig(
             id=uuid.uuid4().hex[:12],
             name=req.name,
@@ -66,6 +71,7 @@ class AgentService:
             capabilities=req.capabilities,
             knowledge_base_ids=req.knowledge_base_ids,
             tool_ids=req.tool_ids,
+            active_entry_ids=req.active_entry_ids,
             status=1,
             created_at=datetime.now(),
             updated_at=datetime.now(),
@@ -87,7 +93,7 @@ class AgentService:
             setattr(agent, field, value)
         agent.updated_at = datetime.now()
 
-        self._validate(agent.llm_config, agent.knowledge_base_ids, agent.tool_ids, validate)
+        self._validate(agent.llm_config, agent.knowledge_base_ids, agent.tool_ids, agent.active_entry_ids, validate)
         return agent_store.save(agent)
 
     def delete(self, agent_id: str) -> bool:

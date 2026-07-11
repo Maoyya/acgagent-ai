@@ -7,6 +7,7 @@
 注意：自定义（用户 API）工具不在此映射，存于 app/db/tool_store.py。
 """
 from app.tools.calculator import CalculatorTool
+from app.tools.knowledge_entry_lookup import KnowledgeEntryLookupTool
 from app.tools.knowledge_search import KnowledgeSearchTool
 from app.tools.web_search import WebSearchTool
 
@@ -15,6 +16,7 @@ BUILTIN_TOOLS = {
     "calculator": CalculatorTool,
     "web_search": WebSearchTool,
     "knowledge_search": KnowledgeSearchTool,
+    "knowledge_entry_lookup": KnowledgeEntryLookupTool,
 }
 
 # 内置工具 id 集合（供引用完整性校验消费）

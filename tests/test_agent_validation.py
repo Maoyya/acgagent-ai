@@ -39,3 +39,16 @@ def test_message_lists_all_missing():
         agent_service._validate_references(["bad-kb"], ["bad-tool"])
     msg = str(exc.value)
     assert "bad-kb" in msg and "bad-tool" in msg
+
+
+def test_rejects_missing_entry_id():
+    """active_entry_ids 引用不存在的条目 → ValueError。"""
+    with pytest.raises(ValueError) as exc:
+        agent_service._validate_references([], [], entry_ids=["ghost"])
+    assert "ghost" in str(exc.value)
+
+
+def test_accepts_builtin_tools_when_entry_ids_empty():
+    """entry_ids 默认 None/空时不影响既有校验。"""
+    agent_service._validate_references([], ["calculator"], entry_ids=[])
+    agent_service._validate_references([], ["calculator"])  # 第 3 参可省
