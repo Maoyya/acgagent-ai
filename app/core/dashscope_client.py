@@ -1,4 +1,3 @@
-# app/core/dashscope_client.py
 """
 dashscope（通义万相）异步任务 HTTP 客户端。
 
