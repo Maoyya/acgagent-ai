@@ -8,7 +8,7 @@ type 决定 details 字段内容（见 spec §3.3）；scope=private 时 user_id
 from datetime import datetime
 from enum import Enum
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 
 class EntryType(str, Enum):
@@ -38,7 +38,16 @@ class KnowledgeEntry(BaseModel):
     tags: list[str] = Field(default_factory=list, description="检索辅助标签")
     details: dict = Field(default_factory=dict, description="类型特有字段（spec §3.3）")
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
-    updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
+    updated_at: Optional[datetime] = Field(
+        default=None, description="更新时间；未提供时与 created_at 一致"
+    )
+
+    @model_validator(mode="after")
+    def _default_updated_at(self) -> "KnowledgeEntry":
+        """创建时（updated_at 未提供）对齐 created_at，避免两次独立 now() 的 µs 级差异。"""
+        if self.updated_at is None:
+            self.updated_at = self.created_at
+        return self
 
 
 class KnowledgeEntryCreateRequest(BaseModel):
