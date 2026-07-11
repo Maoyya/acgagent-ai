@@ -56,6 +56,7 @@ def test_store_list_all_and_delete(tmp_path, monkeypatch):
 
 
 import pytest
+from pydantic import ValidationError
 from app.models.knowledge_entry import (
     KnowledgeEntryCreateRequest, KnowledgeEntryUpdateRequest,
     EntryType, EntryScope,
@@ -102,7 +103,8 @@ def test_service_update_and_delete_sync(tmp_path, monkeypatch, fake_chroma):
 
     assert knowledge_entry_service.delete(entry.id) is True
     assert entry.id not in fake_chroma.collections[_COLLECTION].docs
-    assert knowledge_entry_service.update("nope", KnowledgeEntryUpdateRequest(name="x")) is None
+    # 合法格式但不存在的 entry_id → update 返回 None（非法格式已由 _validate_entry_id 拦截 → ValueError）
+    assert knowledge_entry_service.update("000000000000", KnowledgeEntryUpdateRequest(name="x")) is None
 
 
 def test_service_update_scope_to_private_requires_user_id(tmp_path, monkeypatch, fake_chroma):
@@ -126,3 +128,68 @@ def test_service_list_filters(tmp_path, monkeypatch, fake_chroma):
     assert len(styles) == 1 and styles[0].name == "赛博朋克"
     q = knowledge_entry_service.list(q="赛博")
     assert len(q) == 1
+
+
+# --- 安全硬化：path traversal 纵深防御 + entry_id 格式校验 + user_id 不可变 ---
+
+
+def test_store_path_sanitizes_traversal(tmp_path, monkeypatch):
+    """_path 必须剥掉任何目录/`..` 组件，解析后父目录仍是 _dir()（无逃逸、无子目录）。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.db.knowledge_entry_store import knowledge_entry_store
+    base = knowledge_entry_store._dir().resolve()
+
+    # 各类恶意/异常 entry_id：解析后父目录必须仍是 _dir()
+    for bad in ("../evil", "a/b", "..%2fevil"):
+        p = knowledge_entry_store._path(bad)
+        assert ".." not in p.parts
+        assert p.resolve().parent == base
+
+    # 明确坍缩为纯文件名
+    assert knowledge_entry_store._path("../evil").name == "evil.json"
+    assert knowledge_entry_store._path("a/b").name == "b.json"
+
+
+def test_service_rejects_invalid_entry_id(tmp_path, monkeypatch, fake_chroma):
+    """entry_id 必须是 12 位小写 hex；非法格式在 get/update/delete 入口 raise ValueError。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service
+    req = KnowledgeEntryUpdateRequest(name="x")
+    # 覆盖：含路径 / 过短 / 非hex字符 / 过长
+    bad_ids = ["../x", "bad", "ZZZZZZZZZZZZ", "1234567890", "1234567890abc"]
+    for bid in bad_ids:
+        with pytest.raises(ValueError):
+            knowledge_entry_service.get(bid)
+        with pytest.raises(ValueError):
+            knowledge_entry_service.update(bid, req)
+        with pytest.raises(ValueError):
+            knowledge_entry_service.delete(bid)
+
+
+def test_service_accepts_valid_entry_id(tmp_path, monkeypatch, fake_chroma):
+    """合法 12 位 hex id 不应因校验抛错（条目不存在则返回 None/False）。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service
+    assert knowledge_entry_service.get("1234567890ab") is None
+    assert knowledge_entry_service.update("1234567890ab", KnowledgeEntryUpdateRequest(name="x")) is None
+    assert knowledge_entry_service.delete("1234567890ab") is False
+
+
+def test_update_request_forbids_user_id():
+    """user_id 不可经 update 修改：传该字段 → ValidationError（extra=forbid）。"""
+    with pytest.raises(ValidationError):
+        KnowledgeEntryUpdateRequest(user_id="attacker")
+
+
+def test_service_update_does_not_mutate_user_id(tmp_path, monkeypatch, fake_chroma):
+    """update 其他字段不会重置 user_id（所有权不可篡改）。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service
+    entry = knowledge_entry_service.create(_req(scope=EntryScope.private, user_id="user1"))
+    updated = knowledge_entry_service.update(entry.id, KnowledgeEntryUpdateRequest(name="new"))
+    assert updated is not None
+    assert updated.user_id == "user1"

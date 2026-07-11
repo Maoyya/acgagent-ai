@@ -7,6 +7,7 @@ private 条目必须有 user_id，否则 raise ValueError（路由转 400）。
 ChromaDB 同步失败 best-effort（log warning，不阻断 CRUD）。
 """
 import logging
+import re
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -60,6 +61,12 @@ class KnowledgeEntryService:
         if scope == EntryScope.private and not user_id:
             raise ValueError("private 条目必须提供 user_id")
 
+    def _validate_entry_id(self, entry_id: str) -> None:
+        # entry_id 由服务端生成 = uuid4().hex[:12] = 12 位小写 hex。
+        # 严格匹配，防 path traversal / 越权查询；不匹配 → ValueError（路由转 400）。
+        if not re.fullmatch(r"[0-9a-f]{12}", entry_id):
+            raise ValueError(f"非法 entry_id: {entry_id!r}")
+
     def list(self, type: Optional[str] = None, scope: Optional[str] = None,
              user_id: Optional[str] = None, q: Optional[str] = None) -> list[KnowledgeEntry]:
         result = []
@@ -76,6 +83,7 @@ class KnowledgeEntryService:
         return result
 
     def get(self, entry_id: str) -> Optional[KnowledgeEntry]:
+        self._validate_entry_id(entry_id)
         return knowledge_entry_store.get(entry_id)
 
     def create(self, req: KnowledgeEntryCreateRequest) -> KnowledgeEntry:
@@ -91,6 +99,7 @@ class KnowledgeEntryService:
         return saved
 
     def update(self, entry_id: str, req: KnowledgeEntryUpdateRequest) -> Optional[KnowledgeEntry]:
+        self._validate_entry_id(entry_id)
         entry = knowledge_entry_store.get(entry_id)
         if entry is None:
             return None
@@ -103,6 +112,7 @@ class KnowledgeEntryService:
         return saved
 
     def delete(self, entry_id: str) -> bool:
+        self._validate_entry_id(entry_id)
         ok = knowledge_entry_store.delete(entry_id)
         if ok:
             self._sync_delete(entry_id)

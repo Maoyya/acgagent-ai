@@ -54,12 +54,11 @@ class KnowledgeEntryCreateRequest(BaseModel):
 
 
 class KnowledgeEntryUpdateRequest(BaseModel):
-    """更新知识条目请求（部分更新；type 不可变，传未知字段 → 422）。"""
+    """更新知识条目请求（部分更新；type / user_id 不可变，传未知字段 → 422）。"""
 
-    # type 不在此 → 不可变；extra=forbid 使传 type（或任何未知字段）→ 422（spec §6）
+    # type / user_id 不在此 → 不可变；extra=forbid 使传这些字段（或任何未知字段）→ 422（spec §6）
     model_config = ConfigDict(extra="forbid")
     scope: Optional[EntryScope] = None
-    user_id: Optional[str] = None
     name: Optional[str] = None
     summary: Optional[str] = None
     tags: Optional[list[str]] = None
