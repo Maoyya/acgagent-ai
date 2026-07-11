@@ -193,3 +193,52 @@ def test_service_update_does_not_mutate_user_id(tmp_path, monkeypatch, fake_chro
     updated = knowledge_entry_service.update(entry.id, KnowledgeEntryUpdateRequest(name="new"))
     assert updated is not None
     assert updated.user_id == "user1"
+
+
+# --- Task 4: 注入器 build_system_content ---
+
+def _llm_cfg():
+    return {"provider": "p", "model": "m", "base_url": "u", "api_key": "k"}
+
+
+def test_injector_no_active_returns_base(monkeypatch):
+    from app.core.knowledge_injector import build_system_content
+    from app.models.agent import AgentConfig
+    from app.db.knowledge_entry_store import knowledge_entry_store
+    monkeypatch.setattr(knowledge_entry_store, "get", lambda eid: None)
+    cfg = AgentConfig(id="a1", name="A", system_prompt="你是助手", llm_config=_llm_cfg())
+    assert build_system_content(cfg) == "你是助手"
+
+
+def test_injector_empty_when_no_prompt_no_entries(monkeypatch):
+    from app.core.knowledge_injector import build_system_content
+    from app.models.agent import AgentConfig
+    from app.db.knowledge_entry_store import knowledge_entry_store
+    monkeypatch.setattr(knowledge_entry_store, "get", lambda eid: None)
+    cfg = AgentConfig(id="a1", name="A", system_prompt=None, llm_config=_llm_cfg())
+    assert build_system_content(cfg) == ""
+
+
+def test_injector_renders_block_and_skips_missing(monkeypatch):
+    from app.core.knowledge_injector import build_system_content
+    from app.models.agent import AgentConfig
+    from app.models.knowledge_entry import KnowledgeEntry, EntryType, EntryScope
+    from app.db.knowledge_entry_store import knowledge_entry_store
+
+    char = KnowledgeEntry(id="e1", type=EntryType.character, scope=EntryScope.public,
+                          name="初音", summary="双马尾歌姬",
+                          details={"series": "Vocaloid", "personality": "元气"})
+    style = KnowledgeEntry(id="e2", type=EntryType.style, scope=EntryScope.public,
+                           name="赛博朋克", summary="霓虹机械",
+                           details={"tone": "冷峻"})  # visual_elements 缺失应跳过
+    monkeypatch.setattr(knowledge_entry_store, "get",
+                        lambda eid: {"e1": char, "e2": style}.get(eid))
+
+    cfg = AgentConfig(id="a1", name="A", system_prompt="你是助手",
+                      active_entry_ids=["e1", "e2", "ghost"], llm_config=_llm_cfg())
+    out = build_system_content(cfg)
+    assert out.startswith("你是助手\n\n【参考设定】")
+    assert "[角色] 初音(Vocaloid)：双马尾歌姬 | 性格:元气" in out
+    assert "[风格] 赛博朋克：霓虹机械 | 调性:冷峻" in out
+    assert "视觉" not in out   # 缺失字段跳过
+    assert "ghost" not in out  # 已删条目跳过
