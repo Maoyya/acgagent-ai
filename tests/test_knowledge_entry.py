@@ -242,3 +242,48 @@ def test_injector_renders_block_and_skips_missing(monkeypatch):
     assert "[风格] 赛博朋克：霓虹机械 | 调性:冷峻" in out
     assert "视觉" not in out   # 缺失字段跳过
     assert "ghost" not in out  # 已删条目跳过
+
+
+# --- Task 5: 公共库按需检索工具 ---
+
+def test_tool_returns_only_public(tmp_path, monkeypatch, fake_chroma):
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service
+    from app.tools.knowledge_entry_lookup import KnowledgeEntryLookupTool
+
+    knowledge_entry_service.create(  # public
+        KnowledgeEntryCreateRequest(type=EntryType.character, scope=EntryScope.public,
+                                    name="初音", summary="双马尾歌姬"))
+    knowledge_entry_service.create(  # private，工具不应返回
+        KnowledgeEntryCreateRequest(type=EntryType.character, scope=EntryScope.private,
+                                    user_id="u1", name="我的偏好", summary="私人风格"))
+
+    out = KnowledgeEntryLookupTool().execute(query="歌姬")
+    assert "初音" in out
+    assert "我的偏好" not in out  # 决策⑦：工具只搜公共库
+
+
+def test_tool_entry_type_filter(tmp_path, monkeypatch, fake_chroma):
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service
+    from app.tools.knowledge_entry_lookup import KnowledgeEntryLookupTool
+    knowledge_entry_service.create(
+        KnowledgeEntryCreateRequest(type=EntryType.style, scope=EntryScope.public,
+                                    name="赛博", summary="霓虹"))
+    knowledge_entry_service.create(
+        KnowledgeEntryCreateRequest(type=EntryType.character, scope=EntryScope.public,
+                                    name="初音", summary="歌姬"))
+    out = KnowledgeEntryLookupTool().execute(query="x", entry_type="style")
+    assert "赛博" in out and "初音" not in out
+
+
+def test_tool_empty_query_hint():
+    from app.tools.knowledge_entry_lookup import KnowledgeEntryLookupTool
+    assert KnowledgeEntryLookupTool().execute(query="") == "请提供搜索关键词"
+
+
+def test_tool_registered_in_builtin():
+    from app.tools import BUILTIN_TOOLS
+    assert "knowledge_entry_lookup" in BUILTIN_TOOLS
