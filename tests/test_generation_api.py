@@ -28,6 +28,24 @@ async def test_create_video_missing_image_url_returns_422(client, auth_headers):
     assert resp.status_code == 422
 
 
+async def test_create_video_returns_task_id(client, auth_headers, monkeypatch):
+    async def fake_submit(req, user_id):
+        return Result.success({"task_id": "v-1"})
+
+    monkeypatch.setattr(
+        "app.api.v1.generation.generation_service.submit_video", fake_submit
+    )
+    resp = await client.post(
+        "/api/v1/generations/videos",
+        json={"prompt": "pan", "image_url": "https://cdn/x.png"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 200
+    assert body["data"]["task_id"] == "v-1"
+
+
 async def test_get_task_returns_envelope(client, auth_headers, monkeypatch):
     async def fake_get(task_id):
         return Result.success(
@@ -41,6 +59,49 @@ async def test_get_task_returns_envelope(client, auth_headers, monkeypatch):
     )
     assert resp.status_code == 200
     assert resp.json()["data"]["status"] == "running"
+
+
+async def test_get_task_returns_real_task_model_shape(
+    client, auth_headers, monkeypatch, tmp_path
+):
+    from datetime import datetime
+
+    from app.db.generation_store import GenerationStore
+    from app.models.generation import (
+        GenerationStatus,
+        GenerationTask,
+        GenerationType,
+    )
+
+    # 隔离任务表到 tmp_path，并替换 service 用的单例
+    monkeypatch.setattr("app.config.settings.data_dir", tmp_path)
+    store = GenerationStore()
+    monkeypatch.setattr("app.services.generation_service.generation_store", store)
+    # 终态任务：get_task 不查 dashscope（避免真实网络），直接返回本地记录
+    now = datetime(2026, 7, 11, 12, 0, 0)
+    store.create(
+        GenerationTask(
+            id="t-shape",
+            type=GenerationType.text_to_image,
+            status=GenerationStatus.succeeded,
+            prompt="cat",
+            output_url="http://test/uploads/generations/text_to_image/t-shape.png",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    resp = await client.get(
+        "/api/v1/generations/tasks/t-shape", headers=auth_headers
+    )
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    # 验证真实 GenerationTask 经 ASGI 序列化后的字段/类型（Java 契约）
+    assert data["id"] == "t-shape"
+    assert data["status"] == "succeeded"  # enum 值字符串
+    assert data["type"] == "text_to_image"
+    assert data["output_url"].startswith("http://test/uploads/generations/")
+    assert data["created_at"] == "2026-07-11T12:00:00"  # ISO datetime 序列化
 
 
 async def test_get_task_not_found_body_code_404(client, auth_headers, monkeypatch):

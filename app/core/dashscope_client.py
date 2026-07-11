@@ -8,13 +8,10 @@ dashscope（通义万相）异步任务 HTTP 客户端。
 - 文生图 https://help.aliyun.com/zh/model-studio/text-to-image-v2-api-reference
 - 图生视频 https://help.aliyun.com/zh/model-studio/legacy-image-to-video-api-reference/
 """
-import logging
 from typing import Optional
 
 import httpx
 from pydantic import BaseModel
-
-logger = logging.getLogger("acgagent-ai")
 
 
 class QueryResult(BaseModel):
@@ -41,23 +38,30 @@ class DashScopeClient:
         self._base = base_url.rstrip("/")
         self._image_model = image_model
         self._video_model = video_model
-        headers = {
+        self._transport = transport
+        self._headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        self._client = httpx.AsyncClient(
-            transport=transport, headers=headers, timeout=httpx.Timeout(60.0)
+
+    def _client(self):
+        # 每次调用新建短命 client，由 async with 负责 aclose——不泄漏连接池
+        return httpx.AsyncClient(
+            transport=self._transport,
+            headers=self._headers,
+            timeout=httpx.Timeout(60.0),
         )
 
     async def _submit(
         self, path: str, model: str, data_input: dict, parameters: dict
     ) -> str:
         """提交异步任务，返回 provider task_id。"""
-        resp = await self._client.post(
-            f"{self._base}{path}",
-            json={"model": model, "input": data_input, "parameters": parameters},
-            headers={"X-DashScope-Async": "enable"},
-        )
+        async with self._client() as c:
+            resp = await c.post(
+                f"{self._base}{path}",
+                json={"model": model, "input": data_input, "parameters": parameters},
+                headers={"X-DashScope-Async": "enable"},
+            )
         if resp.status_code != 200:
             raise DashScopeError(f"submit failed: {resp.status_code} {resp.text}")
         task_id = (resp.json().get("output") or {}).get("task_id")
@@ -84,7 +88,8 @@ class DashScopeClient:
         )
 
     async def query_task(self, provider_task_id: str) -> QueryResult:
-        resp = await self._client.get(f"{self._base}/tasks/{provider_task_id}")
+        async with self._client() as c:
+            resp = await c.get(f"{self._base}/tasks/{provider_task_id}")
         if resp.status_code != 200:
             raise DashScopeError(f"query failed: {resp.status_code} {resp.text}")
         out = resp.json().get("output") or {}
