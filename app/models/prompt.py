@@ -24,7 +24,9 @@ class ModerationVerdict(BaseModel):
     violated_rules: list[str] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
-    mode: PromptMode
+    # mode 由 moderator 按入参回填，不依赖 LLM 回显——
+    # 各 provider 结构化输出稳定性不一（qwen 会漏回显 mode），入参才是事实来源。
+    mode: PromptMode = PromptMode.acg
 
 
 class CostEstimate(BaseModel):

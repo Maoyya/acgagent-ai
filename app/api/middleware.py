@@ -9,7 +9,10 @@ logger = logging.getLogger("acgagent-ai")
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
+    """请求日志中间件：按 INFO 级别记录每个请求的方法、路径、状态码与耗时。"""
+
     async def dispatch(self, request: Request, call_next) -> Response:
+        """放行请求，并在响应返回后记录耗时与状态码。"""
         start = time.time()
         response = await call_next(request)
         duration_ms = (time.time() - start) * 1000

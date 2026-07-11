@@ -23,25 +23,31 @@ class EmbeddingConfig(BaseModel):
 
 
 class KnowledgeBase(BaseModel):
+    """知识库实体：聚合 Embedding / 分块配置，关联多个文档；对应 ChromaDB collection kb_{id}_chunks。"""
+
     id: str = Field(default="", description="Auto-generated ID")
     name: str = Field(description="Knowledge base name")
     description: Optional[str] = Field(default=None, description="Description")
-    embedding_config: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
-    chunk_config: ChunkConfig = Field(default_factory=ChunkConfig)
-    document_count: int = Field(default=0)
-    chunk_count: int = Field(default=0)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    embedding_config: EmbeddingConfig = Field(default_factory=EmbeddingConfig, description="向量化模型配置")
+    chunk_config: ChunkConfig = Field(default_factory=ChunkConfig, description="文档分块策略")
+    document_count: int = Field(default=0, description="关联文档数")
+    chunk_count: int = Field(default=0, description="已向量化的分片总数")
+    created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
+    updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
 
 
 class KnowledgeBaseCreateRequest(BaseModel):
-    name: str
-    description: Optional[str] = None
-    embedding_config: EmbeddingConfig = EmbeddingConfig()
-    chunk_config: ChunkConfig = ChunkConfig()
+    """创建知识库请求。"""
+
+    name: str  # 知识库名称
+    description: Optional[str] = None  # 可选描述
+    embedding_config: EmbeddingConfig = EmbeddingConfig()  # 向量化配置，缺省走默认
+    chunk_config: ChunkConfig = ChunkConfig()  # 分块策略，缺省走默认
 
 
 class KnowledgeBaseUpdateRequest(BaseModel):
+    """更新知识库请求（部分更新；embedding_config 创建后不可改）。"""
+
     name: Optional[str] = None
     description: Optional[str] = None
-    chunk_config: Optional[ChunkConfig] = None
+    chunk_config: Optional[ChunkConfig] = None  # 仅可调分块策略

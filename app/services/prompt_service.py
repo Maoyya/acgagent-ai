@@ -65,6 +65,9 @@ class PromptService:
             api_key=settings.meta_llm_api_key,
             temperature=0.0,
             streaming=False,
+            # 关思考等 vendor 选项：deepseek-v4-pro 等 thinking 模型与 function_calling
+            # 的 tool_choice=required 冲突，需在此关 thinking（值由 settings 配置，按 provider 定）。
+            extra_body=settings.meta_llm_mod_extra_body or None,
         )
 
     def _get_gen_llm(self):

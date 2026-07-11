@@ -1,3 +1,4 @@
+"""知识库 CRUD API 端点。"""
 from fastapi import APIRouter
 
 from app.models.knowledge_base import KnowledgeBaseCreateRequest, KnowledgeBaseUpdateRequest
@@ -9,11 +10,13 @@ router = APIRouter(tags=["knowledge-base"])
 
 @router.get("/knowledge-bases")
 async def list_knowledge_bases():
+    """列出全部知识库。"""
     return Result.success(data=knowledge_service.list_all())
 
 
 @router.get("/knowledge-bases/{kb_id}")
 async def get_knowledge_base(kb_id: str):
+    """按 ID 获取知识库；不存在返回 404。"""
     kb = knowledge_service.get(kb_id)
     if kb is None:
         return Result.error(code=404, message=f"Knowledge base not found: {kb_id}")
@@ -22,12 +25,14 @@ async def get_knowledge_base(kb_id: str):
 
 @router.post("/knowledge-bases")
 async def create_knowledge_base(body: KnowledgeBaseCreateRequest):
+    """创建知识库。"""
     kb = knowledge_service.create(body)
     return Result.success(data=kb)
 
 
 @router.put("/knowledge-bases/{kb_id}")
 async def update_knowledge_base(kb_id: str, body: KnowledgeBaseUpdateRequest):
+    """更新知识库；不存在返回 404。"""
     kb = knowledge_service.update(kb_id, body)
     if kb is None:
         return Result.error(code=404, message=f"Knowledge base not found: {kb_id}")
@@ -36,6 +41,7 @@ async def update_knowledge_base(kb_id: str, body: KnowledgeBaseUpdateRequest):
 
 @router.delete("/knowledge-bases/{kb_id}")
 async def delete_knowledge_base(kb_id: str):
+    """删除知识库；不存在返回 404。"""
     ok = knowledge_service.delete(kb_id)
     if not ok:
         return Result.error(code=404, message=f"Knowledge base not found: {kb_id}")
