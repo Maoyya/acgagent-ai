@@ -116,9 +116,11 @@ class AgentWorkflow:
         result = await graph.ainvoke(initial_state)
 
         # 按优先级拼装消息：系统提示 → RAG 上下文 → 历史 → 当前问题
+        from app.core.knowledge_injector import build_system_content
         messages = []
-        if self.agent_config.system_prompt:
-            messages.append(SystemMessage(content=self.agent_config.system_prompt))
+        sys_content = build_system_content(self.agent_config)
+        if sys_content:
+            messages.append(SystemMessage(content=sys_content))
 
         if result.get("context"):
             rag_prefix = f"基于以下参考资料回答用户问题。如果资料中没有相关信息，请说明。\n\n参考资料：\n{result['context']}\n\n"

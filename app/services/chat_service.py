@@ -13,6 +13,7 @@ from typing import AsyncGenerator
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.core.knowledge_injector import build_system_content
 from app.core.llm import create_chat_model
 from app.services import image_service
 from app.core.memory import ConversationMemory
@@ -116,8 +117,9 @@ class ChatService:
         无图返回纯字符串（零回归），有图返回多模态 list（图生文）。
         """
         messages = []
-        if agent_config.system_prompt:
-            messages.append(SystemMessage(content=agent_config.system_prompt))
+        sys_content = build_system_content(agent_config)
+        if sys_content:
+            messages.append(SystemMessage(content=sys_content))
         history = memory.load_messages(conversation_id)
         messages.extend(history)
         messages.append(HumanMessage(content=image_service.build_message_content(message, images)))
