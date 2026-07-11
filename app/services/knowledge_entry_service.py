@@ -103,7 +103,9 @@ class KnowledgeEntryService:
         entry = knowledge_entry_store.get(entry_id)
         if entry is None:
             return None
-        for field, value in req.model_dump(exclude_unset=True).items():
+        # exclude_none：传 tags/details=null 视为"不修改"，避免 setattr(None) 越过 pydantic
+        # 校验、持久化 null 后下次 get 抛 ValidationError 而损坏条目（opus final review F1）。
+        for field, value in req.model_dump(exclude_unset=True, exclude_none=True).items():
             setattr(entry, field, value)
         self._ensure_private_user_id(entry.scope, entry.user_id)  # 合并后校验
         entry.updated_at = datetime.now()

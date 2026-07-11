@@ -287,3 +287,37 @@ def test_tool_empty_query_hint():
 def test_tool_registered_in_builtin():
     from app.tools import BUILTIN_TOOLS
     assert "knowledge_entry_lookup" in BUILTIN_TOOLS
+
+
+# --- 收尾 fix（opus final review）：update null 不损坏条目 + store.get 损坏 JSON 防御 ---
+
+def test_service_update_null_tags_keeps_original(tmp_path, monkeypatch, fake_chroma):
+    """update 传 tags=None 视为"不修改"，不应把 None 写入磁盘损坏条目（F1）。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service
+    entry = knowledge_entry_service.create(_req(name="A", tags=["vocaloid"]))
+    updated = knowledge_entry_service.update(entry.id, KnowledgeEntryUpdateRequest(tags=None))
+    assert updated.tags == ["vocaloid"]  # 原值保留，未被 None 覆盖
+    # 重新从磁盘 get 确认未损坏（覆盖 F1 的 ValidationError 路径）
+    assert knowledge_entry_service.get(entry.id).tags == ["vocaloid"]
+
+
+def test_service_update_null_details_keeps_original(tmp_path, monkeypatch, fake_chroma):
+    """update 传 details=None 同理不损坏（F1）。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.services.knowledge_entry_service import knowledge_entry_service
+    entry = knowledge_entry_service.create(_req(name="A", details={"k": "v"}))
+    knowledge_entry_service.update(entry.id, KnowledgeEntryUpdateRequest(details=None))
+    assert knowledge_entry_service.get(entry.id).details == {"k": "v"}
+
+
+def test_store_get_corrupt_json_returns_none(tmp_path, monkeypatch):
+    """损坏的 entry JSON 不应让 get 崩溃（与 list_all 一致，返回 None）（F2）。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    from app.db.knowledge_entry_store import knowledge_entry_store
+    eid = "corrupt00001"  # store 层不校验 id 格式
+    knowledge_entry_store._path(eid).write_text("{ broken json", encoding="utf-8")
+    assert knowledge_entry_store.get(eid) is None

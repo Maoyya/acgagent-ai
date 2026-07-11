@@ -37,8 +37,12 @@ class KnowledgeEntryStore:
         path = self._path(entry_id)
         if not path.exists():
             return None
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return KnowledgeEntry(**data)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return KnowledgeEntry(**data)
+        except Exception:
+            # 损坏/截断的 JSON 视为不存在（与 list_all 一致），避免未捕获异常 → API 500 / 聊天崩溃。
+            return None
 
     def save(self, entry: KnowledgeEntry) -> KnowledgeEntry:
         path = self._path(entry.id)
