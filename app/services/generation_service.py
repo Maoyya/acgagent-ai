@@ -8,6 +8,8 @@
 import logging
 import uuid
 from datetime import datetime
+from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -83,6 +85,70 @@ class GenerationService:
         )
         generation_store.create(task)
         return Result.success({"task_id": task.id})
+
+    async def get_task(self, task_id: str) -> Result:
+        """轮询任务：pending/running 查 dashscope；终态直接返回（幂等）。
+
+        不存在 → code=404；查询异常 → code=500；否则返回最新任务态。
+        """
+        task = generation_store.get(task_id)
+        if task is None:
+            return Result.error(404, f"task not found: {task_id}")
+        if task.status in (GenerationStatus.pending, GenerationStatus.running):
+            try:
+                await self._refresh(task)
+            except Exception as e:
+                logger.error("query task %s failed: %s", task_id, e)
+                return Result.error(500, f"query failed: {e}")
+        return Result.success(generation_store.get(task_id))
+
+    async def _refresh(self, task: GenerationTask) -> None:
+        """查 dashscope 并按结果更新任务（无状态即时轮询）。
+
+        查询异常上抛，交 get_task 转 500；下载失败就地置 failed（Fail Loud）。
+        """
+        r = await _build_client().query_task(task.provider_task_id)
+        if r.status == "SUCCEEDED":
+            try:
+                local_url = await self._download_asset(r.asset_url, task)
+            except Exception as e:
+                logger.error("download asset for %s failed: %s", task.id, e)
+                generation_store.update(
+                    task.id, status=GenerationStatus.failed, error=f"资产下载失败: {e}"
+                )
+                return
+            generation_store.update(
+                task.id, status=GenerationStatus.succeeded, output_url=local_url
+            )
+        elif r.status == "FAILED":
+            generation_store.update(
+                task.id, status=GenerationStatus.failed,
+                error=r.error or "generation failed",
+            )
+        else:  # PENDING / RUNNING
+            generation_store.update(task.id, status=GenerationStatus.running)
+
+    async def _download_asset(self, remote_url: str, task: GenerationTask) -> str:
+        """下载 dashscope 产物到 storage_root_dir，返回 storage_base_url 形式的持久 URL。
+
+        dashscope 产物 URL 临时（约 24h），必须落本地；资产 HTTP 服务由 Java 侧提供。
+        """
+        ext = self._ext_of(remote_url) or (
+            ".png" if task.type == GenerationType.text_to_image else ".mp4"
+        )
+        rel = f"generations/{task.type.value}/{task.id}{ext}"
+        root = Path(settings.storage_root_dir)
+        (root / f"generations/{task.type.value}").mkdir(parents=True, exist_ok=True)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as dl:
+            resp = await dl.get(remote_url)
+            resp.raise_for_status()
+            (root / rel).write_bytes(resp.content)
+        return f"{settings.storage_base_url.rstrip('/')}/{rel}"
+
+    @staticmethod
+    def _ext_of(url: str) -> str:
+        path = urlparse(url).path
+        return Path(path).suffix.lower()
 
 
 generation_service = GenerationService()
