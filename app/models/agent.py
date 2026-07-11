@@ -35,6 +35,7 @@ class AgentConfig(BaseModel):
     capabilities: list[str] = Field(default_factory=lambda: ["chat"], description="Capabilities: chat / rag / tool_use / workflow")
     knowledge_base_ids: list[str] = Field(default_factory=list, description="Associated knowledge base IDs")
     tool_ids: list[str] = Field(default_factory=list, description="Associated tool IDs")
+    active_entry_ids: list[str] = Field(default_factory=list, description="激活自动注入的结构化知识条目 ID")
     status: int = Field(default=1, description="1=enabled, 0=disabled")
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
@@ -49,6 +50,7 @@ class AgentCreateRequest(BaseModel):
     capabilities: list[str] = ["chat"]
     knowledge_base_ids: list[str] = []
     tool_ids: list[str] = []
+    active_entry_ids: list[str] = []
 
 
 class AgentUpdateRequest(BaseModel):
@@ -60,4 +62,5 @@ class AgentUpdateRequest(BaseModel):
     capabilities: Optional[list[str]] = None
     knowledge_base_ids: Optional[list[str]] = None
     tool_ids: Optional[list[str]] = None
+    active_entry_ids: Optional[list[str]] = None
     status: Optional[int] = None
