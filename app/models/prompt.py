@@ -65,3 +65,21 @@ class EstimateRequest(BaseModel):
     """独立消耗估算请求。"""
     system_prompt: str
     user_hints: list[str] = Field(default_factory=list)
+
+
+class PromptBeautifyRequest(BaseModel):
+    """润色请求：用传入的 agent llm_config 对草稿做二次润色（不校验、不落库）。
+
+    llm_config 为 dict（Java 传所选 Agent 的 provider/model/base_url/api_key/...），
+    service 端解析为 LLMConfig 复用 agent 集成的 key 解析与 base_url 处理。
+    """
+    system_prompt: str = Field(description="待润色的草稿 system_prompt（通常来自 generate）")
+    llm_config: dict = Field(
+        description="润色所用 LLM 配置（Java 传所选 Agent 的 provider/model/base_url/api_key/...）"
+    )
+    mode: PromptMode = PromptMode.acg
+
+
+class PromptBeautifyResponse(BaseModel):
+    """润色响应：仅润色后的 system_prompt。"""
+    system_prompt: str

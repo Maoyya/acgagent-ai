@@ -15,12 +15,16 @@ from langchain_openai import ChatOpenAI
 
 from app.config import settings
 from app.core.cost_estimator import CostEstimator
+from app.core.llm import resolve_api_key
 from app.core.moderator import Moderator
 from app.core.prompt_builder import PromptBuilder
 from app.db.preference_store import preference_store
+from app.models.agent import LLMConfig
 from app.models.common import Result
 from app.models.prompt import (
     ModerateRequest,
+    PromptBeautifyRequest,
+    PromptBeautifyResponse,
     PromptGenerateRequest,
     PromptGenerateResponse,
     PromptMode,
@@ -134,6 +138,35 @@ class PromptService:
     def estimate(self, system_prompt: str, user_hints: list[str]) -> Result:
         """独立消耗估算：纯计算，无需 LLM。"""
         return Result.success(data=self.estimator.estimate(system_prompt, user_hints))
+
+    async def beautify(self, req: PromptBeautifyRequest, user_id: str | None) -> Result:
+        """润色：用传入的 agent llm_config 构造 LLM 对草稿做二次润色。不校验、不落库。
+
+        llm_config 解析为 LLMConfig，复用 agent 集成的 resolve_api_key（支持
+        ACG_AI_LLM_KEY_<PROVIDER> 兜底）与 base_url 处理；非流式、temperature=0.7。
+        LLM 调用失败 → code=500（Fail Loud）；不触发 moderation。
+        """
+        try:
+            cfg = LLMConfig(**(req.llm_config or {}))
+        except Exception as e:
+            return Result.error(code=500, message=f"beautify llm_config invalid: {e}")
+        try:
+            api_key = resolve_api_key(cfg.provider, cfg.api_key)
+        except ValueError as e:
+            return Result.error(code=500, message=str(e))
+        try:
+            refine_llm = ChatOpenAI(
+                model=cfg.model,
+                base_url=cfg.base_url,
+                api_key=api_key,
+                temperature=0.7,
+                streaming=False,
+            )
+            refined = await self.builder.refine(refine_llm, req.system_prompt, req.mode)
+        except Exception:
+            logger.exception("prompt beautify failed")
+            return Result.error(code=500, message="beautify failed")
+        return Result.success(data=PromptBeautifyResponse(system_prompt=refined))
 
 
 prompt_service = PromptService()

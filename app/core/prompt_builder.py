@@ -15,6 +15,11 @@ _STYLE = {
     PromptMode.compliant: "风格：中性专业，避免二次元/动漫风格与夸张人设。",
 }
 
+_REFINE_SYSTEM = (
+    "你是一名资深提示词工程师，擅长在保留原意与风格约束的前提下，"
+    "让系统提示词的表达更流畅、专业。"
+)
+
 
 class PromptBuilder:
     async def build(
@@ -38,6 +43,24 @@ class PromptBuilder:
 
         resp = await llm.ainvoke([
             SystemMessage(content=_META_SYSTEM),
+            HumanMessage(content=payload),
+        ])
+        return (resp.content or "").strip()
+
+    async def refine(self, llm, system_prompt: str, mode: PromptMode) -> str:
+        """对草稿 system_prompt 做二次润色（保留原意、不增删能力承诺，贴合 mode 风格）。
+
+        供 beautify 使用：llm 由调用方用所选 Agent 的 llm_config 构造（非 meta-LLM）。
+        """
+        payload = (
+            f"{_STYLE[mode]}\n"
+            f"下面是一段 Agent 系统提示词草稿，请在**保留原意、不增删能力承诺**的前提下，"
+            f"使表达更流畅、专业。\n"
+            f"---\n{system_prompt}\n---\n"
+            f"输出：只输出润色后的系统提示词正文，不要解释、不要前缀、不要 Markdown 代码块。"
+        )
+        resp = await llm.ainvoke([
+            SystemMessage(content=_REFINE_SYSTEM),
             HumanMessage(content=payload),
         ])
         return (resp.content or "").strip()

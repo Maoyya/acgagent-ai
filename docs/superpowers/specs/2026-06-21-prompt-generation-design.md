@@ -1,7 +1,9 @@
 # 系统提示词生成功能 — 设计文档（Spec）
 
-> 版本：1.0.0 | 日期：2026-06-21 | 所属项目：acgagent-ai
+> 版本：1.1.0 | 日期：2026-06-21（v1.1 修订 2026-06-22） | 所属项目：acgagent-ai
 > 状态：待评审 → 通过后进入 writing-plans
+
+> **v1.1 修订（2026-06-22）**：新增 `beautify`（润色）能力——用请求传入的 Agent `llm_config` 对草稿做二次润色；松绑决策 #4（beautify 用传入 LLM，generate/moderate 仍用 meta-LLM）。**模板保存前的 moderation 闸门归 Java 侧**（Java 调 `/moderate`），Python 的 `beautify` 不校验、不落库。本期 generate 的内部 moderation 保留（作为第一道检查）。
 
 ---
 
@@ -21,7 +23,7 @@
 | 1 | 产品定位 | **双模式**，可配置开关；限制规则按 `mode` 参数化 |
 | 2 | 存储 / 后台 CRUD 位置 | **Java acgagent 侧**管模板 CRUD + MySQL + 后台；**Python 侧**只暴露生成/校验/估算/偏好能力。Python **不引入 MySQL** |
 | 3 | 实施方案 | **方案 A（MVP 分期）**：一期做生成+单裁判校验+生成前估算+偏好写入；二期升级多裁判投票+生成后真实 usage+推荐接口 |
-| 4 | 生成/校验用哪个 LLM | **settings 级 meta-LLM**（环境变量 `ACG_AI_META_LLM_*`），不在请求中传 `llm_config` |
+| 4 | 生成/校验/润色用哪个 LLM | **generate 与 moderate 用 settings 级 meta-LLM**（`ACG_AI_META_LLM_*`），不传 `llm_config`；**beautify（润色）用请求传入的 `llm_config`**（Java 传所选 Agent 的 LLM 配置）——v1.1 新增 |
 | 5 | moderation 不通过返回 | `Result(code=403, message="blocked", data=ModerationVerdict)` |
 | 6 | 一期校验对象 | 只校验**生成出来的 system_prompt**，不预筛用户原始输入（预筛留二期） |
 | 7 | 偏好写入失败 | best-effort，记 warning，**不阻断**主流程 |
@@ -33,10 +35,11 @@
 
 ### 2.1 一期范围（本 spec 覆盖，Python 侧）
 
-1. **生成（b）**：元提示词 → meta-LLM → `system_prompt`
+1. **生成（b）**：元提示词 → meta-LLM → `system_prompt`（含内部 moderation 第一道检查 + 估算 + 偏好写入）
 2. **单裁判 moderation（c）**：按 `mode` 注入规则，structured output 裁决，不通过返回 403
 3. **生成前消耗估算（d）**：tiktoken 复用 `count_tokens`
 4. **偏好写入（f）**：ChromaDB collection `user_preferences`，按 `user_id` 索引
+5. **润色 beautify（v1.1 新增）**：用请求传入的 Agent `llm_config` 对草稿 system_prompt 做二次润色，返回润色后文本。**不校验、不写偏好、不落库**——保存前的 moderation 闸门由 Java 侧在落库前调 `/moderate` 完成
 
 ### 2.2 二期范围（本 spec 不实现，仅留接口/钩子）
 
@@ -150,9 +153,21 @@ class PromptGenerateResponse(BaseModel):
     mode: PromptMode
     moderation: ModerationVerdict
     estimate: CostEstimate
+
+
+class PromptBeautifyRequest(BaseModel):
+    """润色请求（v1.1）。llm_config 复用 agent 集成已有的 LLMConfig 模型（OpenAI 兼容）。"""
+    system_prompt: str = Field(description="待润色的草稿 system_prompt（通常来自 generate）")
+    llm_config: dict = Field(description="润色所用 LLM 配置（Java 传所选 Agent 的 provider/model/base_url/api_key/...）")
+    mode: PromptMode = PromptMode.acg
+
+
+class PromptBeautifyResponse(BaseModel):
+    system_prompt: str = Field(description="润色后的 system_prompt")
 ```
 
 > `Result<T>` 信封沿用 `app/models/common.py`，不在本文件重复定义。
+> `llm_config` 复用 agent 集成既有的 LLMConfig 结构（与 AgentCreateRequest.llm_config 同形），本 spec 不重复定义。
 
 ---
 
@@ -224,6 +239,22 @@ generate(req, user_id):
                                                    moderation=verdict, estimate=estimate))
 ```
 
+### 5.5 润色 beautify（`prompt_service.beautify`，v1.1 新增）
+
+用**请求传入的 `llm_config`**（所选 Agent 的 LLM）构造 `ChatOpenAI`（temperature≈0.7），对草稿做二次润色。**不校验、不写偏好、不落库**——保存前的 moderation 由 Java 侧统一调 `/moderate` 完成。
+
+```
+beautify(req, user_id):
+  1) cfg = LLMConfig(**req.llm_config)               # 复用 agent 集成的 LLMConfig
+     model = create_chat_model(cfg, temperature=0.7)  # 用传入的 Agent LLM，非 meta-LLM
+  2) refined = await model.ainvoke([润色元提示词 + req.system_prompt])   # 非流式
+  3) return Result.success(PromptBeautifyResponse(system_prompt=refined))
+```
+
+润色元提示词：在**保留原意与 mode 风格约束**的前提下使表达更流畅/专业；只输出 system_prompt 正文，不解释、不加前缀。
+
+> `llm_config` 字段缺失或不可用（api_key 缺失）/ LLM 调用失败 → `code=500`（沿用「LLM 异常=500」）。
+
 ---
 
 ## 6. 存储（`preference_store.py`）
@@ -246,8 +277,9 @@ generate(req, user_id):
 
 | 方法 | 路径 | 用途 | 期 |
 |---|---|---|---|
-| POST | `/api/v1/prompts/generate` | 主入口：组装→校验→估算→写偏好，一次返回 | 一期 |
-| POST | `/api/v1/prompts/moderate` | 独立校验（Java 校验用户已保存模板） | 一期 |
+| POST | `/api/v1/prompts/generate` | 主入口：组装→校验→估算→写偏好，一次返回草稿（Java 不再自动落库） | 一期 |
+| POST | `/api/v1/prompts/beautify` | 用传入 agent `llm_config` 润色草稿（不校验/不落库） | 一期(v1.1) |
+| POST | `/api/v1/prompts/moderate` | 独立校验（**Java 保存模板前的统一闸门**也走这里） | 一期 |
 | POST | `/api/v1/prompts/estimate` | 独立消耗估算 | 一期 |
 | GET | `/api/v1/prompts/recommendations` | 偏好推荐 | 二期 |
 
@@ -284,6 +316,28 @@ generate(req, user_id):
 }
 ```
 
+### 7.2 `beautify` 请求 / 响应示例（v1.1）
+
+请求：
+```jsonc
+{
+  "system_prompt": "你是一名客服，回答要专业。",
+  "llm_config": { "provider": "doubao", "model": "doubao-pro", "base_url": "https://ark.cn/api/v3", "api_key": "..." },
+  "mode": "acg"
+}
+// Header: X-API-Key, X-User-Id
+```
+
+响应（`code=200`，润色不校验，永远 200 除非 LLM 调用失败）：
+```jsonc
+{
+  "code": 200, "message": "success",
+  "data": { "system_prompt": "你是一名专业客服……（润色后更流畅的正文）" }
+}
+```
+
+> beautify 的产物是否合规，由 Java 在「保存模板」前调 `/moderate` 统一校验；Python beautify 自身不校验。
+
 ---
 
 ## 8. 错误处理
@@ -295,6 +349,7 @@ generate(req, user_id):
 | meta-LLM 未配置（api_key 缺失）/ 调用失败 | `code=500`，清晰 message（沿用项目「LLM 异常=500」） |
 | structured output 解析失败 | **重试一次**；仍失败 → `code=500`（不静默放行，Fail Loud） |
 | 偏好写入失败 | warning 日志，不阻断，正常返回提示词 |
+| beautify 传入 `llm_config` 无效 / 其 LLM 调用失败（v1.1） | `code=500`（beautify 不校验，仅润色；LLM 异常=500） |
 
 ---
 
@@ -311,6 +366,7 @@ generate(req, user_id):
 | `test_preference_recorded_after_successful_generate` | 成功生成后 ChromaDB 多一条 → 偏好写入 |
 | `test_preference_failure_does_not_block_generate` | mock 偏好写入抛异常，generate 仍正常返回 → best-effort |
 | `test_blocked_returns_403_envelope` | 不通过时 `code=403` 且 data 带原因 → Java 契约 |
+| `test_beautify_uses_provided_llm_config`（v1.1） | 传入 agent llm_config → 用该 LLM 润色，返回更流畅文本，**不触发 moderation** |
 
 ---
 
