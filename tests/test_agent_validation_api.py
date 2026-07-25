@@ -10,7 +10,7 @@ import pytest
 VALID_LLM = {
     "provider": "deepseek", "model": "deepseek-chat",
     "base_url": "https://api.deepseek.com/v1",
-    "api_key": "sk-test", "temperature": 0.7,
+    "temperature": 0.7,
 }
 
 

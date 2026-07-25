@@ -2,13 +2,14 @@
 from types import SimpleNamespace
 from langchain_core.messages import SystemMessage
 
-from app.models.agent import AgentConfig
+from app.models.agent import AgentConfig, LLMConfig
 from app.models.knowledge_entry import KnowledgeEntry, EntryType, EntryScope
 from app.db.knowledge_entry_store import knowledge_entry_store
 
 
 def _llm_cfg():
-    return {"provider": "p", "model": "m", "base_url": "u", "api_key": "k"}
+    # 返回真实 LLMConfig（而非 dict），与 AgentConfig.llm_config 字段类型一致（避免 Pyright 误报）。
+    return LLMConfig(provider="p", model="m", base_url="u")
 
 
 def _entry(eid, name, summary, type=EntryType.character):

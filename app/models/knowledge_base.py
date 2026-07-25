@@ -16,10 +16,10 @@ class ChunkConfig(BaseModel):
 
 
 class EmbeddingConfig(BaseModel):
-    provider: str = Field(default="dashscope", description="Provider: dashscope / openai")
-    model: str = Field(default="text-embedding-v3", description="Embedding model name")
-    base_url: Optional[str] = Field(default=None, description="API base URL")
-    api_key: Optional[str] = Field(default=None, description="API key")
+    provider: str = Field(default="zhipu", description="Provider: zhipu / doubao / qwen（须有对应 ACG_AI_LLM_KEY_<PROVIDER> 字段）")
+    model: str = Field(default="embedding-3", description="Embedding model name")
+    base_url: Optional[str] = Field(default=None, description="API base URL（为空时按 provider 取默认 OpenAI 兼容端点，见 app/core/embeddings.py）")
+    # api_key 不在此配置：与 chat 共用同一 provider key，统一从 .env 取（ACG_AI_LLM_KEY_<PROVIDER>）。
 
 
 class KnowledgeBase(BaseModel):

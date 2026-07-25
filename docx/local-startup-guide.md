@@ -78,9 +78,9 @@ ACG_AI_META_LLM_MODEL=deepseek-chat
 ACG_AI_META_LLM_BASE_URL=https://api.deepseek.com/v1
 ACG_AI_META_LLM_API_KEY=
 
-# —— 对话 / Agent LLM 密钥（方案 B：按 provider 分键）——
-# agent 的 llm_config.api_key 为空时按 provider 从这里取（app/core/llm.py）；
-# agent 自带 api_key 非空则优先用自带的。命名：ACG_AI_LLM_KEY_<PROVIDER 大写>。
+# —— 对话 / Agent LLM 密钥（按 provider 分键；RAG embedding 共用同一 key）——
+# agent 配置不再携带 api_key：一律按 provider 从这里取（app/core/llm.py）。
+# RAG embedding 也复用同一 provider key（app/core/embeddings.py）。命名：ACG_AI_LLM_KEY_<PROVIDER 大写>。
 #   DeepSeek
 ACG_AI_LLM_KEY_DEEPSEEK=
 #   智谱 GLM（base_url: https://open.bigmodel.cn/api/paas/v4/）
@@ -89,6 +89,11 @@ ACG_AI_LLM_KEY_ZHIPU=
 ACG_AI_LLM_KEY_DOUBAO=
 #   通义千问
 ACG_AI_LLM_KEY_QWEN=
+# 多家 provider 可同时使用：上述 4 个 key 互相独立，每个 agent 在自己的 llm_config.provider
+# 声明用哪家，服务即按 provider 取对应 key（app/core/llm.py 的 resolve_api_key）。例：A 同事
+# agent 配 provider: zhipu、B 同事 agent 配 provider: qwen，同一份 .env / 同一个服务实例里
+# 各走各的 key，互不冲突；知识库 embedding 同理（每个 KB 独立 Chroma collection，不同 embedding
+# 提供商/维度也不互相干扰）。新增 provider = app/config.py 加一个 llm_key_<provider> 字段 + .env 加一行 ACG_AI_LLM_KEY_<PROVIDER>。
 
 # —— 服务 / 运行时（均有默认值，按需取消注释覆盖）——
 # ACG_AI_HOST=0.0.0.0

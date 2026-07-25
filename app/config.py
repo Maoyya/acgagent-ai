@@ -3,6 +3,10 @@
 
 使用 pydantic-settings 从环境变量或 .env 文件加载配置。
 所有环境变量前缀为 ACG_AI_（如 ACG_AI_PORT → port）。
+
+取值规则（每个字段通用）：代码里的 "= 默认值" 仅在 .env / 环境变量未设置对应项时生效；
+设置 ACG_AI_<字段名大写>（如 storage_root_dir → ACG_AI_STORAGE_ROOT_DIR）即覆盖默认值。
+未声明的 ACG_AI_* 变量会触发 ValidationError（下方 model_config extra="forbid"，防拼错）。
 """
 import json
 from pathlib import Path
@@ -52,8 +56,10 @@ class Settings(BaseSettings):
                 ) from e
         return v
 
-    # 对话 / Agent LLM 密钥（方案 B：按 provider 分键，由 app/core/llm.py 的 resolve_api_key 消费）。
-    # 对应环境变量 ACG_AI_LLM_KEY_<PROVIDER 大写>。新增 provider 需在此声明字段（fail-loud）。
+    # 外部模型 API 密钥（按 provider 分键）：对话/Agent LLM 由 app/core/llm.py 的 resolve_api_key 消费，
+    # RAG embedding 由 app/core/embeddings.py 的 resolve_embedding_key 消费——同一 provider 的 chat 与
+    # embedding 共用此 key（智谱/dashscope/火山/openai 均如此）。
+    # 对应环境变量 ACG_AI_LLM_KEY_<PROVIDER 大写>。新增 provider 需在此声明字段（fail-loud，防拼错）。
     llm_key_deepseek: str = ""
     llm_key_zhipu: str = ""
     llm_key_doubao: str = ""
@@ -61,14 +67,15 @@ class Settings(BaseSettings):
 
     # 图片存储（图生文）：物理落盘根目录 + 对外/DB 引用 URL 前缀。均可由 .env 覆盖（不锁死）。
     # 发送时转 base64 内联，云端模型不真的拉图——base_url 仅作引用。
-    storage_root_dir: Path = Path("D:/acgagent-ai/uploads")
-    storage_base_url: str = "http://localhost:8100/uploads"
+    storage_root_dir: Path = Path("D:/acgagent-ai/uploads")   # env: ACG_AI_STORAGE_ROOT_DIR
+    storage_base_url: str = "http://localhost:8100/uploads"   # env: ACG_AI_STORAGE_BASE_URL
 
-    # 媒体生成（dashscope 通义万相）：文生图 + 图生视频，异步任务
-    generation_api_key: str = ""   # dashscope key；缺失 → 提交/查询返回 500
-    generation_base_url: str = "https://dashscope.aliyuncs.com/api/v1"
-    generation_image_model: str = "wanx2.1-t2i-turbo"
-    generation_video_model: str = "wan2.1-i2v-turbo"
+    # 媒体生成（dashscope 通义万相）：文生图 + 图生视频，异步任务。
+    # 各字段均可由 .env 覆盖（前缀 ACG_AI_GENERATION_*，字段名大写）。
+    generation_api_key: str = ""   # env: ACG_AI_GENERATION_API_KEY；dashscope key，缺失 → 提交/查询返回 500
+    generation_base_url: str = "https://dashscope.aliyuncs.com/api/v1"   # env: ACG_AI_GENERATION_BASE_URL
+    generation_image_model: str = "wanx2.1-t2i-turbo"   # env: ACG_AI_GENERATION_IMAGE_MODEL
+    generation_video_model: str = "wan2.1-i2v-turbo"   # env: ACG_AI_GENERATION_VIDEO_MODEL
 
     model_config = {
         "env_prefix": "ACG_AI_",

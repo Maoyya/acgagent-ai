@@ -12,14 +12,14 @@ from app.services.chat_service import chat_service
 def _agent(tool_ids):
     return AgentConfig(
         name="t",
-        llm_config=LLMConfig(provider="x", model="m", base_url="http://x", api_key="k"),
+        llm_config=LLMConfig(provider="x", model="m", base_url="http://x"),
         tool_ids=tool_ids,
     )
 
 
 def test_builtin_tool_ids_matches_builtin_tools():
     """BUILTIN_TOOL_IDS 是「合法内置 tool_id」单一真相源，等于 BUILTIN_TOOLS 的键集合。"""
-    assert BUILTIN_TOOL_IDS == {"calculator", "web_search", "knowledge_search", "knowledge_entry_lookup"}
+    assert BUILTIN_TOOL_IDS == {"calculator", "web_search", "knowledge_search", "knowledge_entry_lookup", "image_generation", "video_generation"}
     assert set(BUILTIN_TOOLS.keys()) == BUILTIN_TOOL_IDS
 
 

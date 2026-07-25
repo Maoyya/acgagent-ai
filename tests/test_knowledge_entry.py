@@ -5,7 +5,8 @@ from app.models.knowledge_entry import (
 
 
 def _make_entry(**over):
-    base = dict(
+    # dict[str, Any]：**base 解包时每个 kwarg 视为 Any，避免 Pyright 把字面量值 widen 成联合类型报错
+    base: dict[str, Any] = dict(
         id="abc123",
         type=EntryType.character,
         scope=EntryScope.public,
@@ -56,7 +57,9 @@ def test_store_list_all_and_delete(tmp_path, monkeypatch):
 
 
 import pytest
+from typing import Any
 from pydantic import ValidationError
+from app.models.agent import LLMConfig
 from app.models.knowledge_entry import (
     KnowledgeEntryCreateRequest, KnowledgeEntryUpdateRequest,
     EntryType, EntryScope,
@@ -64,8 +67,11 @@ from app.models.knowledge_entry import (
 
 
 def _req(**over):
-    base = dict(type=EntryType.character, scope=EntryScope.public, name="初音",
-                summary="双马尾歌姬", tags=["vocaloid"], details={"personality": "元气"})
+    # dict[str, Any]：**base 解包时每个 kwarg 视为 Any，避免 Pyright 把字面量值 widen 成联合类型报错
+    base: dict[str, Any] = dict(
+        type=EntryType.character, scope=EntryScope.public, name="初音",
+        summary="双马尾歌姬", tags=["vocaloid"], details={"personality": "元气"},
+    )
     base.update(over)
     return KnowledgeEntryCreateRequest(**base)
 
@@ -95,6 +101,7 @@ def test_service_update_and_delete_sync(tmp_path, monkeypatch, fake_chroma):
     from app.services.knowledge_entry_service import knowledge_entry_service, _COLLECTION
     entry = knowledge_entry_service.create(_req(name="A"))
     updated = knowledge_entry_service.update(entry.id, KnowledgeEntryUpdateRequest(name="B"))
+    assert updated is not None  # update 成功（非 None）后才访问 .name
     assert updated.name == "B"
     docs = fake_chroma.collections[_COLLECTION].docs
     assert entry.id in docs
@@ -181,7 +188,9 @@ def test_service_accepts_valid_entry_id(tmp_path, monkeypatch, fake_chroma):
 def test_update_request_forbids_user_id():
     """user_id 不可经 update 修改：传该字段 → ValidationError（extra=forbid）。"""
     with pytest.raises(ValidationError):
-        KnowledgeEntryUpdateRequest(user_id="attacker")
+        # model_validate(dict)：extra=forbid 仍在运行时拒收未知字段 user_id；用 dict 入参
+        # 而非构造器 kwargs，规避 Pyright "No parameter named user_id" 误报（测试意图不变）。
+        KnowledgeEntryUpdateRequest.model_validate({"user_id": "attacker"})
 
 
 def test_service_update_does_not_mutate_user_id(tmp_path, monkeypatch, fake_chroma):
@@ -198,7 +207,9 @@ def test_service_update_does_not_mutate_user_id(tmp_path, monkeypatch, fake_chro
 # --- Task 4: 注入器 build_system_content ---
 
 def _llm_cfg():
-    return {"provider": "p", "model": "m", "base_url": "u", "api_key": "k"}
+    # 返回真实 LLMConfig（而非 dict）：AgentConfig.llm_config 字段类型即 LLMConfig，
+    # 避免依赖 pydantic 运行时 dict→model 强转而触发 Pyright 误报。
+    return LLMConfig(provider="p", model="m", base_url="u")
 
 
 def test_injector_no_active_returns_base(monkeypatch):
@@ -298,9 +309,10 @@ def test_service_update_null_tags_keeps_original(tmp_path, monkeypatch, fake_chr
     from app.services.knowledge_entry_service import knowledge_entry_service
     entry = knowledge_entry_service.create(_req(name="A", tags=["vocaloid"]))
     updated = knowledge_entry_service.update(entry.id, KnowledgeEntryUpdateRequest(tags=None))
-    assert updated.tags == ["vocaloid"]  # 原值保留，未被 None 覆盖
+    assert updated is not None and updated.tags == ["vocaloid"]  # 原值保留，未被 None 覆盖
     # 重新从磁盘 get 确认未损坏（覆盖 F1 的 ValidationError 路径）
-    assert knowledge_entry_service.get(entry.id).tags == ["vocaloid"]
+    got = knowledge_entry_service.get(entry.id)
+    assert got is not None and got.tags == ["vocaloid"]
 
 
 def test_service_update_null_details_keeps_original(tmp_path, monkeypatch, fake_chroma):
@@ -310,7 +322,8 @@ def test_service_update_null_details_keeps_original(tmp_path, monkeypatch, fake_
     from app.services.knowledge_entry_service import knowledge_entry_service
     entry = knowledge_entry_service.create(_req(name="A", details={"k": "v"}))
     knowledge_entry_service.update(entry.id, KnowledgeEntryUpdateRequest(details=None))
-    assert knowledge_entry_service.get(entry.id).details == {"k": "v"}
+    got = knowledge_entry_service.get(entry.id)
+    assert got is not None and got.details == {"k": "v"}
 
 
 def test_store_get_corrupt_json_returns_none(tmp_path, monkeypatch):

@@ -92,7 +92,6 @@ async def test_create_kb_with_custom_config(client, auth_headers):
             "provider": "openai",
             "model": "text-embedding-3-small",
             "base_url": "https://api.openai.com/v1",
-            "api_key": "sk-test",
         },
         "chunk_config": {
             "chunk_size": 1000,

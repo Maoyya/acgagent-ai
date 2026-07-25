@@ -15,7 +15,7 @@ def main():
             provider="deepseek",
             model="deepseek-chat",
             base_url="https://api.deepseek.com/v1",
-            api_key="",  # 留空 → 运行时从 ACG_AI_LLM_KEY_DEEPSEEK 取（方案 B，见 app/core/llm.py）
+            # api_key 不再配置：运行时按 provider 从 ACG_AI_LLM_KEY_DEEPSEEK 取（见 app/core/llm.py）
             temperature=0.7,
             max_tokens=4096,
             top_p=0.9,
