@@ -8,7 +8,7 @@ from app.db.knowledge_entry_store import knowledge_entry_store
 
 
 def _llm_cfg():
-    return {"provider": "p", "model": "m", "base_url": "u", "api_key": "k"}
+    return {"provider": "p", "model": "m", "base_url": "u"}
 
 
 def _entry(eid, name, summary, type=EntryType.character):

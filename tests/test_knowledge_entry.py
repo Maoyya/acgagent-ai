@@ -198,7 +198,7 @@ def test_service_update_does_not_mutate_user_id(tmp_path, monkeypatch, fake_chro
 # --- Task 4: 注入器 build_system_content ---
 
 def _llm_cfg():
-    return {"provider": "p", "model": "m", "base_url": "u", "api_key": "k"}
+    return {"provider": "p", "model": "m", "base_url": "u"}
 
 
 def test_injector_no_active_returns_base(monkeypatch):

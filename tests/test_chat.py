@@ -57,7 +57,6 @@ async def test_chat_disabled_agent(client, auth_headers):
             "provider": "deepseek",
             "model": "deepseek-chat",
             "base_url": "https://api.deepseek.com/v1",
-            "api_key": "sk-test",
             "temperature": 0.7,
         },
     }, headers=auth_headers)
@@ -96,7 +95,7 @@ async def test_chat_missing_llm_key_returns_500_envelope(client, auth_headers, m
             "provider": "deepseek",
             "model": "deepseek-chat",
             "base_url": "https://api.deepseek.com/v1",
-            "api_key": "",            # 留空 → 依赖 Settings（也为空）→ resolve_api_key 必抛
+            # 不再支持 agent 级 api_key；Settings 已 monkeypatch 为空 → resolve_api_key 必抛
             "temperature": 0.7,
         },
     }, headers=auth_headers)
@@ -225,6 +224,8 @@ async def test_chat_sync_missing_image_returns_500_envelope(client, auth_headers
             return _R()
 
     monkeypatch.setattr("app.services.chat_service.create_chat_model", lambda cfg: _FakeLLM())
+    from app.config import settings
+    monkeypatch.setattr(settings, "llm_key_qwen", "sk-test")  # 预检通过，聚焦"图片缺失 → 500"
 
     resp = await client.post("/api/v1/agents?validate=false", json={
         "name": "Sync Img Agent",
@@ -232,7 +233,6 @@ async def test_chat_sync_missing_image_returns_500_envelope(client, auth_headers
             "provider": "qwen",
             "model": "qwen-vl-max",
             "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "api_key": "sk-test",
             "temperature": 0.7,
         },
     }, headers=auth_headers)
@@ -270,6 +270,8 @@ async def test_chat_threads_images_to_model(client, auth_headers, tmp_path, monk
             return _R()
 
     monkeypatch.setattr("app.services.chat_service.create_chat_model", lambda cfg: _FakeLLM())
+    from app.config import settings
+    monkeypatch.setattr(settings, "llm_key_qwen", "sk-test")  # 预检通过，让 LLM 真正被调用
 
     resp = await client.post("/api/v1/agents?validate=false", json={
         "name": "Vision Agent",
@@ -277,7 +279,6 @@ async def test_chat_threads_images_to_model(client, auth_headers, tmp_path, monk
             "provider": "qwen",
             "model": "qwen-vl-max",
             "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "api_key": "sk-test",
             "temperature": 0.7,
         },
     }, headers=auth_headers)

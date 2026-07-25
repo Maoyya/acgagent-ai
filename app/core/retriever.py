@@ -6,7 +6,7 @@ RAG 检索器。
 检索时使用 Embedding 模型将 query 向量化后做相似度匹配。
 """
 import logging
-from langchain_openai import OpenAIEmbeddings
+from app.core.embeddings import build_embeddings
 from app.db.chroma_client import get_chroma
 from app.models.knowledge_base import EmbeddingConfig
 
@@ -15,13 +15,9 @@ logger = logging.getLogger("acgagent-ai")
 
 class RAGRetriever:
     def __init__(self, embedding_config: EmbeddingConfig):
-        # 使用知识库配置的 Embedding 模型（如 text-embedding-v3）
-        # base_url/api_key 为空时依赖环境变量或 SDK 默认值
-        self.embedding = OpenAIEmbeddings(
-            model=embedding_config.model,
-            base_url=embedding_config.base_url or "",
-            api_key=embedding_config.api_key or "not-needed",
-        )
+        # 使用知识库配置的 Embedding 模型（如 zhipu embedding-3）。
+        # api_key 按 provider 从 .env 取（与 chat 共用），base_url 为空时按 provider 取默认端点。
+        self.embedding = build_embeddings(embedding_config)
 
     def retrieve(
         self,
@@ -31,16 +27,18 @@ class RAGRetriever:
     ) -> list[str]:
         """跨多个知识库 collection 检索相关文档片段。
 
-        对每个知识库独立查询，合并结果。单个知识库检索失败不阻塞其他库。
+        用知识库配置的 Embedding 模型把 query 向量化（与入库同一模型，向量空间一致），
+        再对每个知识库独立查询、合并结果。单个知识库检索失败不阻塞其他库。
         """
         chroma = get_chroma()
+        query_vector = self.embedding.embed_query(query)
         results = []
 
         for kb_id in knowledge_base_ids:
             col_name = f"kb_{kb_id}_chunks"
             try:
                 col = chroma.get_collection(name=col_name)
-                query_result = col.query(query_texts=[query], n_results=top_k)
+                query_result = col.query(query_embeddings=[query_vector], n_results=top_k)
                 for doc in query_result["documents"][0]:
                     results.append(doc)
             except Exception as e:

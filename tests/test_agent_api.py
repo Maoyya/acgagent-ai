@@ -18,7 +18,6 @@ SAMPLE_AGENT = {
         "provider": "deepseek",
         "model": "deepseek-chat",
         "base_url": "https://api.deepseek.com/v1",
-        "api_key": "sk-test-fake",
         "temperature": 0.7,
         "max_tokens": 4096,
         "top_p": 0.9,

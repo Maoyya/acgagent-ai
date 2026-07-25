@@ -61,7 +61,7 @@ async def chat_completions(
     # 预检 LLM key 可解析性：缺失则在分流前返回受控 500 信封，避免 ValueError
     # 在 sync 路径裸奔成无信封 500、或在 stream 的 async gen 中途崩溃（C1/C2）。
     try:
-        resolve_api_key(agent_config.llm_config.provider, agent_config.llm_config.api_key)
+        resolve_api_key(agent_config.llm_config.provider)
     except ValueError as e:
         return Result.error(code=500, message=str(e))
 

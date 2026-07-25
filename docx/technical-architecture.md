@@ -253,7 +253,7 @@ Docker Container (Python 3.11-slim)
 | ACG_AI_LOG_LEVEL    | INFO          | 日志级别           |
 | ACG_AI_DEBUG        | false         | 调试模式           |
 | ACG_AI_META_LLM_PROVIDER / MODEL / BASE_URL / API_KEY | deepseek / deepseek-chat / https://api.deepseek.com/v1 / （空） | meta-LLM：提示词生成 `generate` / 合规校验 `moderate` 使用；`API_KEY` 缺失返回 500 |
-| ACG_AI_LLM_KEY_<PROVIDER> | （空）    | 对话/Agent LLM 按 provider 分键（`DEEPSEEK`/`ZHIPU`/`DOUBAO`/`QWEN`）；agent 自带 `llm_config.api_key` 非空时优先 |
+| ACG_AI_LLM_KEY_<PROVIDER> | （空）    | 外部模型按 provider 分键（`DEEPSEEK`/`ZHIPU`/`DOUBAO`/`QWEN`）；对话 LLM 与 RAG embedding 共用同一 provider key，agent/KB 配置不再携带 `api_key` |
 
 ---
 

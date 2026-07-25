@@ -14,7 +14,7 @@ from app.services.chat_service import ChatService
 
 
 def _agent():
-    return AgentConfig(name="t", llm_config=LLMConfig(provider="x", model="m", base_url="http://x", api_key="k"))
+    return AgentConfig(name="t", llm_config=LLMConfig(provider="x", model="m", base_url="http://x"))
 
 
 class _NoHistoryMemory:

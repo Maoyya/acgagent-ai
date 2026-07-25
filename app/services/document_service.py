@@ -14,6 +14,7 @@ from pathlib import Path
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from app.config import settings
+from app.core.embeddings import build_embeddings
 from app.db.chroma_client import get_chroma
 from app.db.document_store import document_store
 from app.db.knowledge_store import knowledge_store
@@ -97,9 +98,16 @@ class DocumentService:
                 for i, chunk in enumerate(chunks)
             ]
 
+            # 用知识库配置的 Embedding 模型向量化（与检索同一模型，向量空间一致）。
+            # 空 chunks 不调 embed_documents，避免无意义的空请求。
+            vectors = []
+            if chunks:
+                vectors = build_embeddings(kb.embedding_config).embed_documents(chunks)
+
             col.add(
                 ids=chunk_ids,
                 documents=chunks,
+                embeddings=vectors,
                 metadatas=metadatas,
             )
             # 向量化完成，更新文档状态和知识库统计

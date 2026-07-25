@@ -486,4 +486,4 @@ Java 校验用户已保存的模板时单独调用，不走生成：正常返回
 | LLM 温度       | Agent.llm_config   | 0.7                             | 生成随机性         |
 | LLM max_tokens | Agent.llm_config   | 4096                            | 单次最大输出 token |
 | meta-LLM 模型  | ACG_AI_META_LLM_MODEL | deepseek-chat                | 提示词生成/校验用，默认 DeepSeek |
-| 对话 LLM 密钥  | ACG_AI_LLM_KEY_<PROVIDER> | （空）                  | 按 provider 分键；agent 自带 api_key 优先 |
+| 对话 LLM 密钥  | ACG_AI_LLM_KEY_<PROVIDER> | （空）                  | 按 provider 分键；对话与 RAG embedding 共用，agent/KB 不再自带 api_key |

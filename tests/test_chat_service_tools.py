@@ -12,7 +12,7 @@ from app.services.chat_service import chat_service
 def _agent(tool_ids):
     return AgentConfig(
         name="t",
-        llm_config=LLMConfig(provider="x", model="m", base_url="http://x", api_key="k"),
+        llm_config=LLMConfig(provider="x", model="m", base_url="http://x"),
         tool_ids=tool_ids,
     )
 

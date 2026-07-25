@@ -11,10 +11,10 @@ from pydantic import BaseModel, Field
 
 
 class LLMConfig(BaseModel):
-    provider: str = Field(description="Provider identifier: doubao / qwen / deepseek")
+    provider: str = Field(description="Provider identifier: doubao / qwen / deepseek / zhipu")
     model: str = Field(description="Model name")
     base_url: str = Field(description="API base URL (OpenAI-compatible)")
-    api_key: str = Field(description="API key")
+    # api_key 不在此配置：统一从 .env 按 provider 取（ACG_AI_LLM_KEY_<PROVIDER>，见 app/core/llm.py）。
     temperature: float = Field(default=0.7, description="Generation temperature")
     max_tokens: int = Field(default=4096, description="Max output tokens")
     top_p: float = Field(default=0.9, description="Top-P sampling")
