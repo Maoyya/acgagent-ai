@@ -22,6 +22,24 @@ _REFINE_SYSTEM = (
 
 
 class PromptBuilder:
+    def build_messages(
+        self,
+        user_hints: list[str],
+        mode: PromptMode,
+        target_capabilities: list[str],
+    ) -> list:
+        """构造 generate 的 [System, Human] 消息（供流式 astream / 非流式 ainvoke 复用）。"""
+        hints_text = "\n".join(f"- {h}" for h in user_hints) or "-（用户未提供具体要求）"
+        cap_text = ""
+        if target_capabilities:
+            cap_text = f"\n能力边界：该 Agent 仅具备 {('、'.join(target_capabilities))}；提示词不得承诺这些能力之外的功能。"
+        payload = (
+            f"{_STYLE[mode]}\n"
+            f"用户要求：\n{hints_text}{cap_text}\n"
+            f"输出：只输出系统提示词正文，不要解释、不要前缀、不要 Markdown 代码块。"
+        )
+        return [SystemMessage(content=_META_SYSTEM), HumanMessage(content=payload)]
+
     async def build(
         self,
         llm,
@@ -29,22 +47,8 @@ class PromptBuilder:
         mode: PromptMode,
         target_capabilities: list[str],
     ) -> str:
-        """根据用户要求生成 system_prompt 正文。"""
-        hints_text = "\n".join(f"- {h}" for h in user_hints) or "-（用户未提供具体要求）"
-        cap_text = ""
-        if target_capabilities:
-            cap_text = f"\n能力边界：该 Agent 仅具备 {('、'.join(target_capabilities))}；提示词不得承诺这些能力之外的功能。"
-
-        payload = (
-            f"{_STYLE[mode]}\n"
-            f"用户要求：\n{hints_text}{cap_text}\n"
-            f"输出：只输出系统提示词正文，不要解释、不要前缀、不要 Markdown 代码块。"
-        )
-
-        resp = await llm.ainvoke([
-            SystemMessage(content=_META_SYSTEM),
-            HumanMessage(content=payload),
-        ])
+        """根据用户要求生成 system_prompt 正文（非流式 ainvoke）。"""
+        resp = await llm.ainvoke(self.build_messages(user_hints, mode, target_capabilities))
         return (resp.content or "").strip()
 
     async def refine(self, llm, system_prompt: str, mode: PromptMode) -> str:

@@ -9,6 +9,7 @@ generate(): 元提示词生成 → 单裁判校验 → 消耗估算 → 偏好�
 meta-LLM 由 settings 配置，派生两个实例（生成 temp=0.7、校验 temp=0.0），
 非流式（streaming=False），不复用 create_chat_model（其强制 streaming=True）。
 """
+import json
 import logging
 
 from langchain_openai import ChatOpenAI
@@ -26,11 +27,15 @@ from app.models.prompt import (
     PromptBeautifyRequest,
     PromptBeautifyResponse,
     PromptGenerateRequest,
-    PromptGenerateResponse,
     PromptMode,
 )
 
 logger = logging.getLogger("acgagent-ai")
+
+
+def _sse(obj: dict) -> str:
+    """把 dict 序列化成一行 SSE data 帧。"""
+    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
 
 class MetaLLMNotConfigured(RuntimeError):
@@ -84,40 +89,38 @@ class PromptService:
             self._mod_llm = self._build_mod_llm()
         return self._mod_llm
 
-    # -- 主入口 --
-    async def generate(self, req: PromptGenerateRequest, user_id: str | None) -> Result:
+    # -- 主入口（流式）--
+    async def generate_stream(self, req: PromptGenerateRequest, user_id: str | None):
+        """流式生成 system_prompt（SSE）：逐 token content 事件；末尾 done 事件带 estimate。
+
+        v1.2：generate 内不再做 moderation（合规校验统一由保存闸门 create/update 负责），
+        故 generate 恒为「成功流式」——除非 meta-LLM 未配置或调用失败（发 error 事件）。
+        偏好写入仍 best-effort。SSE 帧格式见 _sse。
+        """
         try:
             gen_llm = self._get_gen_llm()
-            mod_llm = self._get_mod_llm()
         except MetaLLMNotConfigured as e:
-            return Result.error(code=500, message=str(e))
-
+            yield _sse({"type": "error", "message": str(e)})
+            return
         try:
-            candidate = await self.builder.build(
-                gen_llm, req.user_hints, req.mode, req.target_capabilities
-            )
-            verdict = await self.moderator.moderate(
-                mod_llm, candidate, req.mode, req.target_capabilities
-            )
+            parts: list[str] = []
+            async for chunk in gen_llm.astream(
+                self.builder.build_messages(req.user_hints, req.mode, req.target_capabilities)
+            ):
+                text = chunk.content or ""
+                if text:
+                    parts.append(text)
+                    yield _sse({"type": "content", "content": text})
+            candidate = "".join(parts).strip()
+            estimate = self.estimator.estimate(candidate, req.user_hints)
+            try:
+                self.prefs.record(user_id, req.mode, req.user_hints, candidate)
+            except Exception as e:
+                logger.warning("preference record failed (best-effort, ignored): %s", e)
+            yield _sse({"type": "done", "estimate": estimate.model_dump()})
         except Exception:
-            # LLM 调用/结构化解析失败：受控 500 信封，不抛裸异常（spec §8 Fail Loud）
-            logger.exception("prompt generation failed")
-            return Result.error(code=500, message="generation failed")
-        if not verdict.passed:
-            return Result(code=403, message="blocked", data=verdict)
-
-        estimate = self.estimator.estimate(candidate, req.user_hints)
-        try:
-            self.prefs.record(user_id, req.mode, req.user_hints, candidate)
-        except Exception as e:
-            logger.warning("preference record failed (best-effort, ignored): %s", e)
-
-        return Result.success(PromptGenerateResponse(
-            system_prompt=candidate,
-            mode=req.mode,
-            moderation=verdict,
-            estimate=estimate,
-        ))
+            logger.exception("prompt generate stream failed")
+            yield _sse({"type": "error", "message": "generation failed"})
 
     async def moderate(self, req: ModerateRequest) -> Result:
         """独立校验：正常返回裁决（code=200，读 passed）；LLM 调用失败时 code=500。"""

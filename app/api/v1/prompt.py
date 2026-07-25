@@ -2,13 +2,14 @@
 系统提示词生成 API。
 
 四个端点（均挂 /api/v1 前缀、需 X-API-Key、user_id 由 Java 经 X-User-Id 透传）：
-- POST /prompts/generate  组装→校验→估算→写偏好，一次返回
+- POST /prompts/generate  流式生成(SSE)：逐 token content 事件 + done 事件带 estimate（不校验/不落库）
 - POST /prompts/beautify  用传入 agent llm_config 润色草稿（不校验/不落库）
-- POST /prompts/moderate  独立校验（Java 校验用户已保存模板）
+- POST /prompts/moderate  独立校验（Java 校验用户已保存模板 / 保存闸门）
 - POST /prompts/estimate  独立消耗估算
 读取 X-User-Id 的方式与 chat.py 一致（Header 直取，不走 Depends）。
 """
 from fastapi import APIRouter, Header
+from fastapi.responses import StreamingResponse
 
 from app.models.common import Result
 from app.models.prompt import (
@@ -26,9 +27,12 @@ router = APIRouter(tags=["prompt"])
 async def generate(
     body: PromptGenerateRequest,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
-) -> Result:
-    """生成系统提示词。校验不通过时返回 code=403。"""
-    return await prompt_service.generate(body, user_id=x_user_id)
+):
+    """流式生成系统提示词（SSE）：content 事件逐 token；done 事件带 estimate；不校验/不落库。"""
+    return StreamingResponse(
+        prompt_service.generate_stream(body, user_id=x_user_id),
+        media_type="text/event-stream",
+    )
 
 
 @router.post("/prompts/moderate")
