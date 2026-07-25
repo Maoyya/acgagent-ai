@@ -18,7 +18,10 @@ from app.models.tool import ToolVO, ToolCreateRequest, ToolParameterSchema
 class ToolService:
     def __init__(self):
         # 内置工具 ID 集合，这些工具不可删除
-        self._builtin_ids = {"calculator", "web_search", "knowledge_search"}
+        self._builtin_ids = {
+            "calculator", "web_search", "knowledge_search",
+            "knowledge_entry_lookup", "image_generation", "video_generation",
+        }
 
     def list_all(self) -> list[ToolVO]:
         """返回所有工具（内置 + 用户自定义），内置工具排在前面。"""
@@ -59,6 +62,33 @@ class ToolService:
                    parameters=ToolParameterSchema(properties={"query": {"type": "string", "description": "搜索关键词"}}, required=["query"])),
             ToolVO(id="knowledge_search", name="知识库搜索", description="在知识库中检索信息", type="builtin",
                    parameters=ToolParameterSchema(properties={"query": {"type": "string", "description": "搜索问题"}}, required=["query"])),
+            ToolVO(id="knowledge_entry_lookup", name="设定库检索",
+                   description="在公共设定库中搜索风格/角色/故事等参考设定", type="builtin",
+                   parameters=ToolParameterSchema(
+                       properties={
+                           "query": {"type": "string", "description": "搜索关键词"},
+                           "entry_type": {"type": "string", "enum": ["style", "character", "story"],
+                                          "description": "条目类型（可选）"},
+                       },
+                       required=["query"])),
+            ToolVO(id="image_generation", name="文生图",
+                   description="根据文字描述生成图片", type="builtin",
+                   parameters=ToolParameterSchema(
+                       properties={
+                           "prompt": {"type": "string", "description": "文生图提示词"},
+                           "size": {"type": "string", "description": "图片尺寸，如 1024*1024"},
+                           "n": {"type": "integer", "description": "生成数量"},
+                       },
+                       required=["prompt"])),
+            ToolVO(id="video_generation", name="图生视频",
+                   description="根据公网图片 URL 生成视频", type="builtin",
+                   parameters=ToolParameterSchema(
+                       properties={
+                           "prompt": {"type": "string", "description": "图生视频提示词"},
+                           "image_url": {"type": "string", "description": "公网可达的首帧图 URL"},
+                           "duration": {"type": "integer", "description": "视频时长（秒）"},
+                       },
+                       required=["prompt", "image_url"])),
         ]
 
     def _get_builtins_map(self) -> dict[str, ToolVO]:

@@ -10,6 +10,8 @@ from app.tools.calculator import CalculatorTool
 from app.tools.knowledge_entry_lookup import KnowledgeEntryLookupTool
 from app.tools.knowledge_search import KnowledgeSearchTool
 from app.tools.web_search import WebSearchTool
+from app.tools.image_generation import ImageGenerationTool
+from app.tools.video_generation import VideoGenerationTool
 
 # 内置工具 id → 实现类
 BUILTIN_TOOLS = {
@@ -17,6 +19,8 @@ BUILTIN_TOOLS = {
     "web_search": WebSearchTool,
     "knowledge_search": KnowledgeSearchTool,
     "knowledge_entry_lookup": KnowledgeEntryLookupTool,
+    "image_generation": ImageGenerationTool,
+    "video_generation": VideoGenerationTool,
 }
 
 # 内置工具 id 集合（供引用完整性校验消费）
